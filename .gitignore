@@ -128,3 +128,8 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Log
+logs/
+
+# tar packages
+*.tar
