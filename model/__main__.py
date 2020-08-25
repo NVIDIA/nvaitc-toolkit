@@ -14,8 +14,8 @@ import re
 import torch
 import torch.optim as optim
 
-from model.launchers import Tester, Trainer
-from model.loader import get_loader, loaders
+from model.launchers import Tester, DALITrainer, TVTrainer
+from model.loader.loaders import ImageNetTrainPipe, ImageNetValPipe
 from model.network import get_network
 from model.util import timeme
 
@@ -28,8 +28,6 @@ import torch.backends.cudnn as cudnn
 import torch.multiprocessing as mp
 
 from torch.utils.tensorboard import SummaryWriter
-
-from nvidia.dali.plugin.pytorch import DALIGenericIterator
 
 import pprint
 
@@ -47,11 +45,14 @@ def process_train(args, cfg=None):
     # Since we start from scratch set start epoch as 1
     args.epstart = 1
 
+    crop_size = 224
+    val_size = 256
+    
     # Scale learning rate based on global batch size
     args.lr = args.lr*float(args.batch_size*args.world_size)/256.
 
  
-    kwargs = {'num_threads' : args.workers}
+    #kwargs = {'num_threads' : args.workers}
 
     traindir = os.path.join(args.data_dir, 'train')
     valdir = os.path.join(args.data_dir, 'val')
@@ -87,22 +88,15 @@ def process_train(args, cfg=None):
     compression = hvd.Compression.none
     # Horovod: wrap optimizer with DistributedOptimizer.
 
-    print('World Size', args.world_size)
-    if args.world_size > 1:
-        #optimizer = hvd.DistributedOptimizer(
-        #    optimizer, named_parameters=network.named_parameters(),
-        #    compression=compression,
-        #    backward_passes_per_step=args.batches_per_allreduce,
-        #    op=hvd.Adasum if args.use_adasum else hvd.Average)
+    if hvd.local_rank() == 0:
+        print('World Size', args.world_size)
 
+    if args.distributed:
         optimizer = hvd.DistributedOptimizer(
-                optimizer, named_parameters=network.named_parameters()
-            )            
-    
-    # optimizer = optim.Adam(network.parameters())
-    # optimizer = hvd.DistributedOptimizer(
-    #    optimizer, named_parameters=network.named_parameters()
-    # )
+            optimizer, named_parameters=network.named_parameters(),
+            compression=compression,
+            backward_passes_per_step=args.batches_per_allreduce,
+            op=hvd.Adasum if args.use_adasum else hvd.Average)
 
     # Optionally resume from a checkpoint
     if args.resume:
@@ -131,17 +125,47 @@ def process_train(args, cfg=None):
     hvd.broadcast_parameters(network.state_dict(), root_rank=0)
     hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
-    # TODO: fix data loader torchvision
     if args.loader == 'dali':
-        train = get_loader('train_loader', args.batch_size, hvd.local_rank(), hvd.size(), traindir, **kwargs)    
-        train.build()
-        train_loader = DALIClassificationIterator(train, reader_name="Reader", fill_last_batch=False)
+        if hvd.local_rank() == 0:
+            print('Using DALI as data loader')
+        #train = get_loader('train_loader', args.batch_size, hvd.local_rank(), hvd.size(), traindir, **kwargs)    
+        #train.build()
+        #train_loader = DALIClassificationIterator(train, reader_name="Reader", fill_last_batch=False)
 
-        val = get_loader('val_loader', args.batch_size, hvd.local_rank(), hvd.size(), valdir, **kwargs)    
-        val.build()
-        val_loader = DALIClassificationIterator(val, reader_name="Reader", fill_last_batch=False)
+        #val = get_loader('val_loader', args.batch_size, hvd.local_rank(), hvd.size(), valdir, **kwargs)    
+        #val.build()
+        #val_loader = DALIClassificationIterator(val, reader_name="Reader", fill_last_batch=False)
+
+        pipe = ImageNetTrainPipe(batch_size=args.batch_size, 
+            num_threads=args.workers,
+            device_id=args.local_rank,
+            data_dir=traindir,
+            crop=crop_size,
+            dali_cpu=args.dali_cpu,
+            shard_id=args.local_rank,
+            num_shards=args.world_size)
+        pipe.build()
+
+        train_loader = DALIClassificationIterator(pipe, reader_name="Reader", fill_last_batch=False)
+
+        pipe = ImageNetValPipe(batch_size=args.batch_size,
+                            num_threads=args.workers,
+                            device_id=args.local_rank,
+                            data_dir=valdir,
+                            crop=crop_size,
+                            size=val_size,
+                            shard_id=args.local_rank,
+                            num_shards=args.world_size)
+        pipe.build()
+        val_loader = DALIClassificationIterator(pipe, reader_name="Reader", fill_last_batch=False)        
+
+        launcher = DALITrainer(args, train_loader, val_loader, network, optimizer)
+        launcher.run()
 
     elif args.loader == 'torchvision':
+
+        if hvd.local_rank() == 0:
+            print('Using TorchVision as data loader')
 
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
             std=[0.229, 0.224, 0.225])
@@ -159,12 +183,6 @@ def process_train(args, cfg=None):
         # `num_replicas=hvd.size()` and `rank=hvd.rank()`.
         train_sampler = torch.utils.data.distributed.DistributedSampler(
             train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
-
-        '''
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=allreduce_batch_size,
-            sampler=train_sampler, **kwargs)
-        '''
 
         train_loader = torch.utils.data.DataLoader(
             train_dataset, batch_size=args.allreduce_batch_size, shuffle=(train_sampler is None),
@@ -184,8 +202,8 @@ def process_train(args, cfg=None):
         val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size,
                                                 sampler=val_sampler, num_workers=args.workers, pin_memory=True)            
   
-    launcher = Trainer(args, train_loader, val_loader, network, optimizer)
-    launcher.run()
+        launcher = TVTrainer(args, train_loader, train_sampler, val_loader, network, optimizer)
+        launcher.run()
 
 def process_restart(args, cfg):
     cfg['amp_on'] = 1 if args.amp else None
@@ -269,17 +287,6 @@ def process_convert(args, cfg):
 
 def main():
 
-
-    # parser = argparse.ArgumentParser(description='Deployment tool')
-    # subparsers = parser.add_subparsers()
-
-    # add_p = subparsers.add_parser('add')
-    # add_p.add_argument("name")
-    # add_p.add_argument("--web_port")
-
-    # upg_p = subparsers.add_parser('upgrade')
-    # upg_p.add_argument("name")
-
     ap = ArgumentParser(description='New Image Classifier')
     sp = ap.add_subparsers(dest='cmd')
 
@@ -343,6 +350,10 @@ def main():
     
     # Mixed precision
     ap.add_argument('--amp', '-a', action='store_true')
+    ap.add_argument('--opt-level', type=str, default="O1")
+
+    # Loader
+    ap.add_argument('-dl', '--loader', type=str, default="dali")
 
     # Deterministic runtime
     ap.add_argument('--deterministic', action='store_true')
@@ -380,9 +391,11 @@ def main():
     args.gpu = args.local_rank
     args.world_size = hvd.size()
 
+    args.distributed = args.world_size > 1
+
     # Enable cudnn benchmark
     cudnn.benchmark = True
-    best_prec1 = 0
+    #best_prec1 = 0
     if args.deterministic:
         cudnn.benchmark = False
         cudnn.deterministic = True
@@ -398,10 +411,8 @@ def main():
     # Horovod: print logs on the first worker.
     # verbose = 1 if hvd.rank() == 0 else 0
 
-    args.loader = 'dali'
     args.arch = 'resnet50'
     args.image_size = (224, 224)
-
     
     cfg = {'save_nsteps': 5,
            'test_path':

@@ -17,33 +17,13 @@ import sys
 from random import shuffle
 
 class ImageNetTrainPipe(Pipeline):
-
-    name = 'train_loader'
-    
-    #{'num_threads': 10, 'file_list': './STL10/train_filelist.txt', 'train_path': './STL10', 'num_shards': 1}
-
-    # (batch_size, rank, ngpu, **kwargs)
-
-    '''
     def __init__(self, batch_size, num_threads, device_id, data_dir, crop,
                  shard_id, num_shards, dali_cpu=False):
-    '''
-
-    def __init__(self, batch_size, device_id, num_shards, data_path, num_threads, dali_cpu=False):
-
-        print("Calling DALI Loader ImageNet")
-
-        print('Device ID', device_id)
-        print('Num Shards', num_shards)
-        print('Num Threads', num_threads)
-
-        crop = 224
-
         super(ImageNetTrainPipe, self).__init__(batch_size,
                                               num_threads,
                                               device_id,
                                               seed=12 + device_id)
-        self.input = ops.FileReader(file_root=data_path,
+        self.input = ops.FileReader(file_root=data_dir,
                                     shard_id=device_id,
                                     num_shards=num_shards,
                                     random_shuffle=True,
@@ -66,7 +46,7 @@ class ImageNetTrainPipe(Pipeline):
                               resize_y=crop,
                               interp_type=types.INTERP_TRIANGULAR)
         self.cmnp = ops.CropMirrorNormalize(device="gpu",
-                                            output_dtype=types.FLOAT,
+                                            dtype=types.FLOAT,
                                             output_layout=types.NCHW,
                                             crop=(crop, crop),
                                             mean=[0.485 * 255,0.456 * 255,0.406 * 255],
@@ -83,35 +63,25 @@ class ImageNetTrainPipe(Pipeline):
         return [output, self.labels]
 
 class ImageNetValPipe(Pipeline):
-
-    name = 'val_loader'
-
-    # Add Crop and Val
-    # TODO: drop file list
-
-    # val = get_loader('val_loader', cfg['batch_size'], hvd.local_rank(), hvd.size(), cfg['load_path'] + '/val', **kwargs)
-
-    def __init__(self, batch_size, device_id, num_shards, data_path, num_threads):
-
-        crop_size = 224
-        val_size = 256
-        
-        super(ImageNetValPipe, self).__init__(batch_size, num_threads, device_id, seed=12 + device_id)
-
-        self.input = ops.FileReader(file_root=data_path,
+    def __init__(self, batch_size, num_threads, device_id, data_dir, crop,
+                 size, shard_id, num_shards):
+        super(ImageNetValPipe, self).__init__(batch_size,
+                                           num_threads,
+                                            device_id,
+                                            seed=12 + device_id)
+        self.input = ops.FileReader(file_root=data_dir,
                                     shard_id=device_id,
                                     num_shards=num_shards,
                                     random_shuffle=False,
                                     pad_last_batch=True)
         self.decode = ops.ImageDecoder(device="mixed", output_type=types.RGB)
         self.res = ops.Resize(device="gpu",
-                              resize_shorter=val_size,
+                              resize_shorter=size,
                               interp_type=types.INTERP_TRIANGULAR)
         self.cmnp = ops.CropMirrorNormalize(device="gpu",
-                                            #dtype=types.FLOAT,
-                                            output_dtype=types.FLOAT,
+                                            dtype=types.FLOAT,
                                             output_layout=types.NCHW,
-                                            crop=(crop_size, crop_size),
+                                            crop=(crop, crop),
                                             mean=[0.485 * 255,0.456 * 255,0.406 * 255],
                                             std=[0.229 * 255,0.224 * 255,0.225 * 255])
 
@@ -120,51 +90,4 @@ class ImageNetValPipe(Pipeline):
         images = self.decode(self.jpegs)
         images = self.res(images)
         output = self.cmnp(images)
-        return [output, self.labels]       
-
-
-class TorchVisionPipeline(object):
-
-    def __init__(self, batch_size, device_id, num_threads, num_shards, file_list, 
-                 split):
-
-        print("Calling new TorchVision Loader")
-
-        class Wrapdict(object):
-            def __getitem__(self, index):
-                if self.labels is not None:
-                    img, target = self.data[index], int(self.labels[index])
-                else:
-                    img, target = self.data[index], None
-
-                img = Image.fromarray(np.transpose(img, (1, 2, 0)))
-
-                if self.transform is not None:
-                    img = self.transform(img)
-
-                # Transform to STL-2 (vehicle vs. animal)
-                if self.target_transform is not None:
-                    # airplane, bird, car, cat, deer,
-                    # dog, horse, monkey, ship, truck
-                    vehindx = [0, 2, 8, 9]
-                    toh = np.array([1]) if target in vehindx else np.array([0])
-
-                return [{'data': img, 'label': toh}]
-
-        ModDS = type('', (Wrapdict, STL10), {})
-
-        # input_dir = '/newt/data/STL10'
-
-        input_dir = file_list
-
-        dataset = ModDS(
-            root=input_dir, transform=torchvision.transforms.ToTensor(),
-            target_transform=True, download=True, split=split
-        )
-
-        self.loader = DataLoader(dataset, batch_size=batch_size,
-                                 num_workers=1, shuffle=True)
-
-    def get(self):
-        return self.loader
-
+        return [output, self.labels]
