@@ -13,6 +13,9 @@ import pprint
 import math
 import shutil
 import time
+import torch.nn.functional as F
+
+from tqdm import tqdm
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -55,135 +58,92 @@ class Trainer(object):
 
     @timeme
     def run(self):
-
-        best_prec1 = 0
-
-        for e in range(self.args.epstart, self.args.epochs + 1):
-            batch_time = AverageMeter()
-            losses = AverageMeter()
-            top1 = AverageMeter()
-            top5 = AverageMeter()
-
+        resume_from_epoch = 0
+        verbose = True
+        
+        for epoch in range(resume_from_epoch, self.args.epochs):
             self.network.train()
+
+            train_loss = Metric('train_loss')
+            train_accuracy = Metric('train_accuracy')
 
             end = time.time()
 
+            with tqdm(total=self.train_loader._size,
+            # with tqdm(total=len(self.train_loader),
+                    #  with tqdm(total=len(train_loader),
+                    desc='Train Epoch #{}'.format(epoch + 1),
+                    disable=not verbose) as t:
 
-            # Torchvision
-            
-            for i, (images, target) in enumerate(self.train_loader):
-                # measure data loading time
-                # data_time.update(time.time() - end)
-                images = images.cuda(device=self.args.gpu, non_blocking=True)
-                target = target.cuda(device=self.args.gpu, non_blocking=True)
-            
-            # DALI
-            
-            # for i, data in enumerate(self.train_loader):
-            #    # print(type(data), len(data), type(data[0]))
-            #    images = data[0]['data']
-            #    target = data[0]['label'].squeeze().cuda().long()
+                # Torchvision
+                # for i, (data, target) in enumerate(self.train_loader):
+                for i, dt in enumerate(self.train_loader):
+                    data = dt[0]['data']
+                    target = dt[0]['label'].squeeze().cuda().long()
+                    
+                    batch_idx = i
+                    self.adjust_learning_rate(epoch, batch_idx)
 
-            #    images = images.cuda()
-            #    target = target.cuda()
-            #    train_loader_len = int(math.ceil(self.train_loader._size / self.args.batch_size))
-            #             
-                train_loader_len = int(math.ceil(self.train_loader.__len__() / self.args.batch_size))
+                    if self.args.cuda:
+                        data, target = data.cuda(), target.cuda()
 
-                adjust_learning_rate(self.optimizer, e, i, train_loader_len, self.args.lr)
-                output = self.network(images)
-                loss = self.lossfunc(output, target)
+                    self.optimizer.zero_grad()
+                    # Split data into sub-batches of size batch_size
+                    for i in range(0, len(data), self.args.batch_size):
+                        data_batch = data[i:i + self.args.batch_size]
+                        target_batch = target[i:i + self.args.batch_size]
+                        output = self.network(data_batch)
+                        train_accuracy.update(accuracy(output, target_batch))
+                        loss = F.cross_entropy(output, target_batch)
+                        train_loss.update(loss)
+                        # Average gradients among sub-batches
+                        loss.div_(math.ceil(float(len(data)) / self.args.batch_size))
 
-                # compute gradient and do SGD step
+                        if self.args.amp:
+                            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                                scaled_loss.backward()
+                        else:
+                            loss.backward()
 
-                self.optimizer.zero_grad()
-                if self.args.amp:
-                    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                        if self.args.world_size > 1:
+                        # loss.backward()
+                    # Gradient is applied across all ranks
+
+                    if self.args.amp and self.args.world_size > 1:
                             self.optimizer.synchronize()
-                    if self.args.world_size > 1:
-                        with self.optimizer.skip_synchronize():
-                            self.optimizer.step()
-                    else: 
-                        self.optimizer.step()
-                else:
-                    loss.backward()
-                    self.optimizer.step()
-
-                if i % self.args.print_freq == 0:
-                    # Every print_freq iterations, check the loss, accuracy, and speed.
-                    # For best performance, it doesn't make sense to print these metrics every
-                    # iteration, since they incur an allreduce and some host<->device syncs.
-
-                    # Measure accuracy
-                    prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-
-                    # Average loss and accuracy across processes for logging
-                    # TODO: fix with horovod
-                    if self.args.world_size > 1:
-                        reduced_loss = reduce_tensor(loss.data)
-                        prec1 = reduce_tensor(prec1)
-                        prec5 = reduce_tensor(prec5)
+                            with self.optimizer.skip_synchronize():
+                                self.optimizer.step()
                     else:
-                        reduced_loss = loss.data
+                        self.optimizer.step()      
 
-                    # to_python_float incurs a host<->device sync
-                    losses.update(to_python_float(reduced_loss), images.size(0))
-                    top1.update(to_python_float(prec1), images.size(0))
-                    top5.update(to_python_float(prec5), images.size(0))
+                    # self.optimizer.step()
 
-                    # torch.cuda.synchronize()
+                    t.set_postfix({'loss': train_loss.avg.item(),
+                                'accuracy': 100. * train_accuracy.avg.item()})
+                    t.update(1)
 
-                    batch_time.update((time.time() - end)/self.args.print_freq)                   
-                    end = time.time()
+            if log_writer:
+                log_writer.add_scalar('train/loss', train_loss.avg, epoch)
+                log_writer.add_scalar('train/accuracy', train_accuracy.avg, epoch)
 
-                    if hvd.local_rank() == 0:
-                        print('Epoch: [{0}][{1}/{2}]\t'
-                            'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                            'Speed {3:.3f} ({4:.3f})\t'
-                            'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
-                            'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                            'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                            e, i, train_loader_len,
-                            hvd.size()*self.args.batch_size/batch_time.val,
-                            hvd.size()*self.args.batch_size/batch_time.avg,
-                            batch_time=batch_time,
-                            loss=losses, top1=top1, top5=top5))
-        
-            # evaluate on validation set
-            [prec1, prec5] = self.validate(self.val_loader, self.network, self.lossfunc)
-
-            # remember best prec@1 and save checkpoint
-            if self.args.local_rank == 0:
-                is_best = prec1 > best_prec1
-                best_prec1 = max(prec1, best_prec1)
-                # FIXME: save checkpoint
-                save_checkpoint({
-                    'epoch': e + 1,
-                    'arch': self.args.arch,
-                    'state_dict': self.network.state_dict(),
-                    'best_prec1': best_prec1,
-                    'optimizer' : self.optimizer.state_dict(),
-                }, is_best)
-                
-                if e == self.args.epochs - 1:
-                    print('##Top-1 {0}\n'
-                        '##Top-5 {1}\n'
-                        '##Perf  {2}'.format(
-                        prec1,
-                        prec5,
-                        self.args.batch_size / total_time.avg))
-
-            if self.args.loader == 'dali':
-                self.train_loader.reset()
-                self.val_loader.reset()
-
-            if self.log_writer:
-                # self.log_writer.add_scalar('train/loss', train_loss.avg, epoch)
-                self.log_writer.add_scalar('train/loss', losses.avg, e)
-                self.log_writer.add_scalar('train/accuracy', top1.avg, e)
-                # self.log_writer.add_scalar('train/accuracy', train_accuracy.avg, epoch)
+    # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
+    # accuracy. Scale the learning rate `lr = base_lr` ---> `lr = base_lr * hvd.size()` during
+    # the first five epochs. See https://arxiv.org/abs/1706.02677 for details.
+    # After the warmup reduce learning rate by 10 on the 30th, 60th and 80th epochs.
+    def adjust_learning_rate(self, epoch, batch_idx):
+        if epoch < self.args.warmup_epochs:
+            epoch += float(batch_idx + 1) / self.train_loader._size
+            # epoch += float(batch_idx + 1) / len(self.train_loader)
+            lr_adj = 1. / hvd.size() * (epoch * (hvd.size() - 1) / self.args.warmup_epochs + 1)
+        elif epoch < 30:
+            lr_adj = 1.
+        elif epoch < 60:
+            lr_adj = 1e-1
+        elif epoch < 80:
+            lr_adj = 1e-2
+        else:
+            lr_adj = 1e-3
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = self.args.base_lr * hvd.size() * self.args.batches_per_allreduce * lr_adj
 
     def validate(self, val_loader, network, criterion):
         batch_time = AverageMeter()
@@ -199,15 +159,15 @@ class Trainer(object):
         i = 1
 
         # Torchvision
-        for input, target in val_loader:
-            input, target = input.cuda(), target.cuda()
-            val_loader_len = int(val_loader.__len__() / self.args.batch_size)
+        #for input, target in val_loader:
+        #    input, target = input.cuda(), target.cuda()
+        #    val_loader_len = int(len(val_loader)/ self.args.batch_size)
 
         # DALI
-        #for i, data in enumerate(val_loader):
-        #    input = data[0]["data"]
-        #    target = data[0]["label"].squeeze().cuda().long()
-        #    val_loader_len = int(val_loader._size / self.args.batch_size)
+        for i, data in enumerate(val_loader):
+            input = data[0]["data"]
+            target = data[0]["label"].squeeze().cuda().long()
+            val_loader_len = int(val_loader._size / self.args.batch_size)
 
             # compute output
             with torch.no_grad():
@@ -348,8 +308,7 @@ def accuracy(output, target, topk=(1,)):
         correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
-
-
+    
 def reduce_tensor(tensor):
     '''
     rt = tensor.clone()
@@ -387,7 +346,33 @@ def adjust_learning_rate(optimizer, epoch, step, len_epoch, lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
+
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, 'model_best.pth.tar')        
+
+
+
+
+# Horovod: average metrics from distributed training.
+class Metric(object):
+    def __init__(self, name):
+        self.name = name
+        self.sum = torch.tensor(0.)
+        self.n = torch.tensor(0.)
+
+    def update(self, val):
+        self.sum += hvd.allreduce(val.detach().cpu(), name=self.name)
+        self.n += 1
+
+    @property
+    def avg(self):
+        return self.sum / self.n
+
+'''
+def accuracy(output, target):
+    # get the index of the max log-probability
+    pred = output.max(1, keepdim=True)[1]
+    return pred.eq(target.view_as(pred)).cpu().float().mean()
+'''

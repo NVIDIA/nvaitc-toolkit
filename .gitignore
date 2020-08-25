@@ -133,3 +133,6 @@ logs/
 
 # tar packages
 *.tar
+
+# torch2rt
+torch2trt/

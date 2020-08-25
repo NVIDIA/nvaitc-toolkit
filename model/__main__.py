@@ -315,7 +315,10 @@ def main():
                     help='data loading path')
     ap_run.add_argument('--loss-scale', type=str, default=None)     
     ap_run.add_argument('--resume', default='', type=str, metavar='PATH',
-                        help='path to latest checkpoint (default: none)')                                                                                                            
+                        help='path to latest checkpoint (default: none)')    
+    ap_run.add_argument('--warmup-epochs', type=float, default=5,
+                        help='number of warmup epochs')
+
     ap_run.set_defaults(process=process_train)
 
     # Restart from state
@@ -395,7 +398,7 @@ def main():
     # Horovod: print logs on the first worker.
     # verbose = 1 if hvd.rank() == 0 else 0
 
-    args.loader = 'torchvision'
+    args.loader = 'dali'
     args.arch = 'resnet50'
     args.image_size = (224, 224)
 
