@@ -88,11 +88,15 @@ class DALITrainer(object):
                 #    self.optimizer.step()
                 #if args.prof >= 0: torch.cuda.nvtx.range_pop()
 
-                if self.args.amp is not None:
+                if self.args.amp:
                     with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                         scaled_loss.backward()
-                        self.optimizer.synchronize()
-                    with self.optimizer.skip_synchronize():
+                        if self.args.distributed:
+                            self.optimizer.synchronize()
+                    if self.args.distributed:                   
+                        with self.optimizer.skip_synchronize():
+                            self.optimizer.step()
+                    else:
                         self.optimizer.step()
                 else:
                     loss.backward()
@@ -128,7 +132,7 @@ class DALITrainer(object):
                             'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                             'Speed {3:.3f} ({4:.3f})\t'
                             'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
-                            'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                            #'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                             'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                             epoch, i, train_loader_len,
                             self.args.world_size*self.args.batch_size/batch_time.val,
@@ -255,7 +259,7 @@ class DALITrainer(object):
                     'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                     'Speed {2:.3f} ({3:.3f})\t'
                     'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                    'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                    #'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                     'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                     i, val_loader_len,
                     self.args.world_size * self.args.batch_size / batch_time.val,
@@ -323,11 +327,15 @@ class TVTrainer(object):
                 
                 self.optimizer.zero_grad()
 
-                if self.args.amp is not None:
+                if self.args.amp:
                     with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                         scaled_loss.backward()
-                        self.optimizer.synchronize()
-                    with self.optimizer.skip_synchronize():
+                        if self.args.distributed:
+                            self.optimizer.synchronize()
+                    if self.args.distributed:                   
+                        with self.optimizer.skip_synchronize():
+                            self.optimizer.step()
+                    else:
                         self.optimizer.step()
                 else:
                     loss.backward()
@@ -380,13 +388,16 @@ class TVTrainer(object):
                             'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                             'Speed {3:.3f} ({4:.3f})\t'
                             'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
-                            'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                    #        'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                             'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                             epoch, i, len(self.train_loader),
                             self.args.world_size*self.args.batch_size/batch_time.val,
                             self.args.world_size*self.args.batch_size/batch_time.avg,
                             batch_time=batch_time,
                             loss=losses, top1=top1, top5=top5))
+
+
+
                 #if args.prof >= 0: torch.cuda.nvtx.range_push("prefetcher.next()")
                 input, target = prefetcher.next()
                 #if args.prof >= 0: torch.cuda.nvtx.range_pop()

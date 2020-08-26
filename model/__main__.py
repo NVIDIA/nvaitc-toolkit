@@ -443,6 +443,7 @@ def fast_collate(batch, memory_format):
     h = imgs[0].size[1]
     tensor = torch.zeros( (len(imgs), 3, h, w), dtype=torch.uint8).contiguous(memory_format=memory_format)
     for i, img in enumerate(imgs):
+        # img = transforms.ToTensor(img)
         nump_array = np.asarray(img, dtype=np.uint8)
         if(nump_array.ndim < 3):
             nump_array = np.expand_dims(nump_array, axis=-1)
