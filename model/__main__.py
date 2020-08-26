@@ -85,16 +85,6 @@ def process_train(args, cfg=None):
     if args.local_rank == 0:
         print('World Size', args.world_size)
 
-    if args.distributed:
-        #optimizer = hvd.DistributedOptimizer(
-        #    optimizer, named_parameters=network.named_parameters(),
-        #    compression=compression,
-        #    backward_passes_per_step=args.batches_per_allreduce,
-        #    op=hvd.Adasum if args.use_adasum else hvd.Average)
-
-        optimizer = hvd.DistributedOptimizer(
-            optimizer, named_parameters=network.named_parameters())
-
     # Optionally resume from a checkpoint
     if args.resume:
         # Use a local scope to avoid dangling references
@@ -112,14 +102,24 @@ def process_train(args, cfg=None):
                 print("=> no checkpoint found at '{}'".format(args.resume))
         resume()
 
-    # Option for Apex/AMP multiprecision training
-    if args.amp:
-        network, optimizer = amp.initialize(network, optimizer,
-                                      opt_level=args.opt_level)
+    if args.distributed:
+        optimizer = hvd.DistributedOptimizer(
+            optimizer, named_parameters=network.named_parameters(),
+            compression=compression,
+            backward_passes_per_step=args.batches_per_allreduce,
+            op=hvd.Adasum if args.use_adasum else hvd.Average)
 
     # Horovod: broadcast parameters & optimizer state.
     hvd.broadcast_parameters(network.state_dict(), root_rank=0)
     hvd.broadcast_optimizer_state(optimizer, root_rank=0)
+
+    # Option for Apex/AMP multiprecision training
+    if args.amp:
+        network, optimizer = amp.initialize(network, optimizer,
+                opt_level=args.opt_level,
+                keep_batchnorm_fp32=args.keep_batchnorm_fp32,
+                loss_scale=args.loss_scale
+                )
 
     if args.loader == 'dali':
         if hvd.local_rank() == 0:
@@ -205,6 +205,7 @@ def process_train(args, cfg=None):
         launcher = TVTrainer(args, train_loader, train_sampler, val_loader, network, optimizer)
         launcher.run()
 
+#FIXME has not been adapted yet to the new structure of the code
 def process_restart(args, cfg):
     cfg['amp_on'] = 1 if args.amp else None
     # Since we restart get start epoch from the file name
@@ -353,6 +354,9 @@ def main():
     # Mixed precision
     ap.add_argument('--amp', '-a', action='store_true')
     ap.add_argument('--opt-level', type=str, default="O1")
+    ap.add_argument('--keep-batchnorm-fp32', type=str, default=None)
+    ap.add_argument('--loss-scale', type=str, default=None)
+    ap.add_argument('--channels-last', type=bool, default=False)
 
     # Loader
     ap.add_argument('-dl', '--loader', type=str, default="dali")
@@ -367,8 +371,6 @@ def main():
     ap.add_argument('--dali_cpu', action='store_true', 
         help='Runs CPU based version of DALI pipeline.')
 
-    # FIXME
-    ap.add_argument('--channels-last', type=bool, default=False)        
 
     args = ap.parse_args()
 
@@ -417,19 +419,15 @@ def main():
 
     args.arch = 'resnet50'
     
-    cfg = {'save_nsteps': 5,
-           'test_path':
-           './data/img',
-           'save_path': './trained/state.pt',
-           'cam_dir': './cam',
-           #'image_size': (96, 96),
-           'image_size': (224, 224)}
+    #cfg = {'save_nsteps': 5,
+    #       'test_path':
+    #       './data/img',
+    #       'save_path': './trained/state.pt',
+    #       'cam_dir': './cam',
+    #       #'image_size': (96, 96),
+    #       'image_size': (224, 224)}
 
-    # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
-    # issues with Infiniband implementations that are not fork-safe
-    if (cfg.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
-            mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
-        cfg['multiprocessing_context'] = 'forkserver'
+    cfg = {}
 
     if hasattr(args, 'process'):
         args.process(args, cfg)

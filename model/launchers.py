@@ -66,27 +66,37 @@ class DALITrainer(object):
                 loss = self.criterion(output, target)
 
                 # compute gradient and do SGD step
-                if self.args.distributed:
-                    self.optimizer.synchronize()
+                #if self.args.distributed:
+                #    self.optimizer.synchronize()
                 self.optimizer.zero_grad()
 
                 #if args.prof >= 0: torch.cuda.nvtx.range_push("backward")
 
-                if self.args.amp is not None:
-                    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                else:
-                    loss.backward()
+                #if self.args.amp is not None:
+                #    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                #        scaled_loss.backward()
+                #else:
+                #    loss.backward()
                 
                 #if args.prof >= 0: torch.cuda.nvtx.range_pop()
 
                 #if args.prof >= 0: torch.cuda.nvtx.range_push("optimizer.step()")
-                if self.args.distributed:
+                #if self.args.distributed:
+                #    with self.optimizer.skip_synchronize():
+                #        self.optimizer.step()
+                #else:
+                #    self.optimizer.step()
+                #if args.prof >= 0: torch.cuda.nvtx.range_pop()
+
+                if self.args.amp is not None:
+                    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                        self.optimizer.synchronize()
                     with self.optimizer.skip_synchronize():
                         self.optimizer.step()
                 else:
+                    loss.backward()
                     self.optimizer.step()
-                #if args.prof >= 0: torch.cuda.nvtx.range_pop()
 
                 if i%self.args.print_freq == 0:
                     # Every print_freq iterations, check the loss, accuracy, and speed.
@@ -164,7 +174,6 @@ class DALITrainer(object):
 
             self.train_loader.reset()
             self.val_loader.reset()
-
 
     # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
     # accuracy. Scale the learning rate `lr = base_lr` ---> `lr = base_lr * hvd.size()` during
@@ -275,6 +284,7 @@ class TVTrainer(object):
         self.log_writer = SummaryWriter(self.args.log_dir) if hvd.rank() == 0 else None
     
     def run(self):
+        best_prec1 = 0
         #for epoch in range(args.start_epoch, args.epochs):
         for epoch in range(0, self.args.epochs):
             if self.args.distributed:
@@ -309,15 +319,26 @@ class TVTrainer(object):
                 loss = self.criterion(output, target)
 
                 # compute gradient and do SGD step
-                self.optimizer.synchronize()
+                #self.optimizer.synchronize()
+                
                 self.optimizer.zero_grad()
 
-                #if args.prof >= 0: torch.cuda.nvtx.range_push("backward")
                 if self.args.amp is not None:
                     with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                         scaled_loss.backward()
+                        self.optimizer.synchronize()
+                    with self.optimizer.skip_synchronize():
+                        self.optimizer.step()
                 else:
                     loss.backward()
+                    self.optimizer.step()
+
+                #if args.prof >= 0: torch.cuda.nvtx.range_push("backward")
+                #if self.args.amp is not None:
+                #    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                #        scaled_loss.backward()
+                #else:
+                #    loss.backward()
 
                 #if args.prof >= 0: torch.cuda.nvtx.range_pop()
 
@@ -325,8 +346,8 @@ class TVTrainer(object):
                 #     print(param.data.double().sum().item(), param.grad.data.double().sum().item())
 
                 #if args.prof >= 0: torch.cuda.nvtx.range_push("optimizer.step()")
-                with self.optimizer.skip_synchronize():
-                    self.optimizer.step()
+                #with self.optimizer.skip_synchronize():
+                #    self.optimizer.step()
                 #if args.prof >= 0: torch.cuda.nvtx.range_pop()
 
                 if i%self.args.print_freq == 0:
@@ -382,15 +403,15 @@ class TVTrainer(object):
             prec1 = self.validate()
 
             # remember best prec@1 and save checkpoint
-            if args.local_rank == 0:
+            if self.args.local_rank == 0:
                 is_best = prec1 > best_prec1
                 best_prec1 = max(prec1, best_prec1)
                 save_checkpoint({
                     'epoch': epoch + 1,
-                    'arch': args.arch,
-                    'state_dict': model.state_dict(),
+                    'arch': self.args.arch,
+                    'state_dict': self.model.state_dict(),
                     'best_prec1': best_prec1,
-                    'optimizer' : optimizer.state_dict(),
+                    'optimizer' : self.optimizer.state_dict(),
                 }, is_best)
 
     def adjust_learning_rate(self, epoch, step, len_epoch):
