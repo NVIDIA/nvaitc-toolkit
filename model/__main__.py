@@ -27,6 +27,8 @@ import torch.backends.cudnn as cudnn
 
 import torch.multiprocessing as mp
 
+import numpy as np
+
 from torch.utils.tensorboard import SummaryWriter
 
 import pprint
@@ -40,7 +42,7 @@ except ImportError:
     raise ImportError("Please install DALI from https://www.github.com/NVIDIA/DALI to run this example.")
 
 
-# @timeme
+@timeme
 def process_train(args, cfg=None):
     # Since we start from scratch set start epoch as 1
     args.epstart = 1
@@ -51,14 +53,8 @@ def process_train(args, cfg=None):
     # Scale learning rate based on global batch size
     args.lr = args.lr*float(args.batch_size*args.world_size)/256.
 
- 
-    #kwargs = {'num_threads' : args.workers}
-
     traindir = os.path.join(args.data_dir, 'train')
     valdir = os.path.join(args.data_dir, 'val')
-
-    # Get a network object and push it onto device
-    # network = get_network(args.arch)
 
     network = models.resnet50()
 
@@ -83,20 +79,21 @@ def process_train(args, cfg=None):
                                 weight_decay=args.weight_decay)
 
     # Horovod: (optional) compression algorithm.
-    # FIXME
-    # compression = hvd.Compression.fp16 if args.fp16_allreduce else hvd.Compression.none
-    compression = hvd.Compression.none
+    compression = hvd.Compression.fp16 if args.fp16_allreduce else hvd.Compression.none
     # Horovod: wrap optimizer with DistributedOptimizer.
 
-    if hvd.local_rank() == 0:
+    if args.local_rank == 0:
         print('World Size', args.world_size)
 
     if args.distributed:
+        #optimizer = hvd.DistributedOptimizer(
+        #    optimizer, named_parameters=network.named_parameters(),
+        #    compression=compression,
+        #    backward_passes_per_step=args.batches_per_allreduce,
+        #    op=hvd.Adasum if args.use_adasum else hvd.Average)
+
         optimizer = hvd.DistributedOptimizer(
-            optimizer, named_parameters=network.named_parameters(),
-            compression=compression,
-            backward_passes_per_step=args.batches_per_allreduce,
-            op=hvd.Adasum if args.use_adasum else hvd.Average)
+            optimizer, named_parameters=network.named_parameters())
 
     # Optionally resume from a checkpoint
     if args.resume:
@@ -117,9 +114,8 @@ def process_train(args, cfg=None):
 
     # Option for Apex/AMP multiprecision training
     if args.amp:
-        network, optimizer = amp.initialize(network, optimizer)
-
-    # Instantiate a trainer launcher and run!
+        network, optimizer = amp.initialize(network, optimizer,
+                                      opt_level=args.opt_level)
 
     # Horovod: broadcast parameters & optimizer state.
     hvd.broadcast_parameters(network.state_dict(), root_rank=0)
@@ -164,44 +160,48 @@ def process_train(args, cfg=None):
 
     elif args.loader == 'torchvision':
 
-        if hvd.local_rank() == 0:
+        if args.local_rank == 0:
             print('Using TorchVision as data loader')
-
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225])
-
+        
         train_dataset = datasets.ImageFolder(
             traindir,
             transforms.Compose([
-                transforms.RandomResizedCrop(224),
+                transforms.RandomResizedCrop(crop_size),
                 transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                normalize,
+                # transforms.ToTensor(), Too slow
+                # normalize,
             ]))
+
+        val_dataset = datasets.ImageFolder(valdir, transforms.Compose([
+                transforms.Resize(val_size),
+                transforms.CenterCrop(crop_size),
+            ]))            
 
         # Horovod: use DistributedSampler to partition data among workers. Manually specify
         # `num_replicas=hvd.size()` and `rank=hvd.rank()`.
-        train_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
+
+        train_sampler = None
+        val_sampler = None
+        
+        if args.distributed:
+            train_sampler = torch.utils.data.distributed.DistributedSampler(
+                train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
+            val_sampler = torch.utils.data.distributed.DistributedSampler(
+                val_dataset, num_replicas=hvd.size(), rank=hvd.rank())
+
+        collate_fn = lambda b: fast_collate(b, memory_format)
 
         train_loader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=args.allreduce_batch_size, shuffle=(train_sampler is None),
-            num_workers=args.workers, pin_memory=True, sampler=train_sampler)
+            train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+            num_workers=args.workers, pin_memory=True, sampler=train_sampler, collate_fn=collate_fn)
 
-        val_dataset = \
-            datasets.ImageFolder(valdir,
-                                transform=transforms.Compose([
-                                    transforms.Resize(256),
-                                    transforms.CenterCrop(224),
-                                    transforms.ToTensor(),
-                                    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                        std=[0.229, 0.224, 0.225])
-                                ]))
-        val_sampler = torch.utils.data.distributed.DistributedSampler(
-            val_dataset, num_replicas=hvd.size(), rank=hvd.rank())
-        val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size,
-                                                sampler=val_sampler, num_workers=args.workers, pin_memory=True)            
-  
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset,
+            batch_size=args.batch_size, shuffle=False,
+            num_workers=args.workers, pin_memory=True,
+            sampler=val_sampler,
+            collate_fn=collate_fn)        
+    
         launcher = TVTrainer(args, train_loader, train_sampler, val_loader, network, optimizer)
         launcher.run()
 
@@ -325,6 +325,8 @@ def main():
                         help='path to latest checkpoint (default: none)')    
     ap_run.add_argument('--warmup-epochs', type=float, default=5,
                         help='number of warmup epochs')
+    ap_run.add_argument('--start-epoch', default=0, type=int, metavar='N',
+                        help='manual epoch number (useful on restarts)')
 
     ap_run.set_defaults(process=process_train)
 
@@ -358,6 +360,9 @@ def main():
     # Deterministic runtime
     ap.add_argument('--deterministic', action='store_true')
 
+    ap.add_argument('--fp16-allreduce', action='store_true', default=False,
+                    help='use fp16 compression during allreduce')
+
     # CPU Based DALI pipeline
     ap.add_argument('--dali_cpu', action='store_true', 
         help='Runs CPU based version of DALI pipeline.')
@@ -371,21 +376,14 @@ def main():
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
-    # print(args.log_dir)
-
-    # TODO
-    args.seed = 1
-
     hvd.init()
-    torch.manual_seed(args.seed)
 
     # Horovod: limit # of CPU threads to be used per worker.
-    torch.set_num_threads(4)
+    #torch.set_num_threads(4)
 
     if args.cuda:
         # Horovod: pin GPU to local rank.
         torch.cuda.set_device(hvd.local_rank())
-        torch.cuda.manual_seed(args.seed)
 
     args.local_rank = hvd.local_rank()
     args.gpu = args.local_rank
@@ -393,10 +391,16 @@ def main():
 
     args.distributed = args.world_size > 1
 
+    if args.distributed:
+        torch.cuda.set_device(args.gpu)
+        #torch.distributed.init_process_group(backend='nccl',
+        #                                     init_method='env://')
+
     # Enable cudnn benchmark
     cudnn.benchmark = True
-    #best_prec1 = 0
+
     if args.deterministic:
+        # args.seed = 999
         cudnn.benchmark = False
         cudnn.deterministic = True
         torch.manual_seed(args.local_rank)
@@ -412,7 +416,6 @@ def main():
     # verbose = 1 if hvd.rank() == 0 else 0
 
     args.arch = 'resnet50'
-    args.image_size = (224, 224)
     
     cfg = {'save_nsteps': 5,
            'test_path':
@@ -422,21 +425,32 @@ def main():
            #'image_size': (96, 96),
            'image_size': (224, 224)}
 
-    #
-    # FIXME
     # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
     # issues with Infiniband implementations that are not fork-safe
     if (cfg.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
             mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
         cfg['multiprocessing_context'] = 'forkserver'
 
-    # lr = args.lr*float(args.batch_size*args.world_size)/256.
-
     if hasattr(args, 'process'):
         args.process(args, cfg)
     else:
         ap.print_help()
 
+
+def fast_collate(batch, memory_format):
+
+    imgs = [img[0] for img in batch]
+    targets = torch.tensor([target[1] for target in batch], dtype=torch.int64)
+    w = imgs[0].size[0]
+    h = imgs[0].size[1]
+    tensor = torch.zeros( (len(imgs), 3, h, w), dtype=torch.uint8).contiguous(memory_format=memory_format)
+    for i, img in enumerate(imgs):
+        nump_array = np.asarray(img, dtype=np.uint8)
+        if(nump_array.ndim < 3):
+            nump_array = np.expand_dims(nump_array, axis=-1)
+        nump_array = np.rollaxis(nump_array, 2)
+        tensor[i] += torch.from_numpy(nump_array)
+    return tensor, targets
 
 if __name__ == '__main__': 
     main()

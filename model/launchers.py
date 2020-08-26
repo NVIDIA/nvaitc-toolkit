@@ -21,7 +21,6 @@ class DALITrainer(object):
         self.criterion = CrossEntropyLoss().cuda()
         self.args = args
 
-        # FIXME: comulative log writer
         # Horovod: write TensorBoard logs on first worker.
         self.log_writer = SummaryWriter(args.log_dir) if hvd.rank() == 0 else None
 
@@ -32,11 +31,9 @@ class DALITrainer(object):
 
     def run(self):
         total_time = AverageMeter()
+        best_prec1 = 0
 
-
-        # for epoch in range(self.args.start_epoch, self.args.epochs):
-        for epoch in range(0, self.args.epochs):
-            
+        for epoch in range(self.args.start_epoch, self.args.epochs):
             batch_time = AverageMeter()
             losses = AverageMeter()
             top1 = AverageMeter()
@@ -69,10 +66,12 @@ class DALITrainer(object):
                 loss = self.criterion(output, target)
 
                 # compute gradient and do SGD step
-                self.optimizer.synchronize()
+                if self.args.distributed:
+                    self.optimizer.synchronize()
                 self.optimizer.zero_grad()
 
                 #if args.prof >= 0: torch.cuda.nvtx.range_push("backward")
+
                 if self.args.amp is not None:
                     with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                         scaled_loss.backward()
@@ -82,7 +81,10 @@ class DALITrainer(object):
                 #if args.prof >= 0: torch.cuda.nvtx.range_pop()
 
                 #if args.prof >= 0: torch.cuda.nvtx.range_push("optimizer.step()")
-                with self.optimizer.skip_synchronize():
+                if self.args.distributed:
+                    with self.optimizer.skip_synchronize():
+                        self.optimizer.step()
+                else:
                     self.optimizer.step()
                 #if args.prof >= 0: torch.cuda.nvtx.range_pop()
 
@@ -139,29 +141,29 @@ class DALITrainer(object):
             #    break
 
             # evaluate on validation set
-            [prec1, prec5] = validate(val_loader, model, criterion)
+            [prec1, prec5] = self.validate()
 
             # remember best prec@1 and save checkpoint
-            if args.local_rank == 0:
+            if self.args.local_rank == 0:
                 is_best = prec1 > best_prec1
                 best_prec1 = max(prec1, best_prec1)
                 save_checkpoint({
                     'epoch': epoch + 1,
-                    'arch': args.arch,
-                    'state_dict': model.state_dict(),
+                    'arch': self.args.arch,
+                    'state_dict': self.model.state_dict(),
                     'best_prec1': best_prec1,
-                    'optimizer' : optimizer.state_dict(),
+                    'optimizer' : self.optimizer.state_dict(),
                 }, is_best)
-                if epoch == args.epochs - 1:
+                if epoch == self.args.epochs - 1:
                     print('##Top-1 {0}\n'
                         '##Top-5 {1}\n'
                         '##Perf  {2}'.format(
                         prec1,
                         prec5,
-                        args.total_batch_size / total_time.avg))
+                        self.args.total_batch_size / total_time.avg))
 
-            train_loader.reset()
-            val_loader.reset()
+            self.train_loader.reset()
+            self.val_loader.reset()
 
 
     # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
@@ -199,39 +201,31 @@ class DALITrainer(object):
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
 
-    def validate(self, val_loader, network, criterion):
+    def validate(self):
         batch_time = AverageMeter()
         losses = AverageMeter()
         top1 = AverageMeter()
         top5 = AverageMeter()
 
         # switch to evaluate mode
-        self.network.eval()
+        self.model.eval()
 
         end = time.time()
 
-        i = 1
-
-        # Torchvision
-        #for input, target in val_loader:
-        #    input, target = input.cuda(), target.cuda()
-        #    val_loader_len = int(len(val_loader)/ self.args.batch_size)
-
-        # DALI
-        for i, data in enumerate(val_loader):
+        for i, data in enumerate(self.val_loader):
             input = data[0]["data"]
             target = data[0]["label"].squeeze().cuda().long()
-            val_loader_len = int(val_loader._size / self.args.batch_size)
+            val_loader_len = int(self.val_loader._size / self.args.batch_size)
 
             # compute output
             with torch.no_grad():
-                output = network(input)
-                loss = criterion(output, target)
+                output = self.model(input)
+                loss = self.criterion(output, target)
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+            prec1, prec5 = self.accuracy(output.data, target, topk=(1, 5))
 
-            if self.args.world_size > 1:
+            if self.args.distributed:
                 reduced_loss = reduce_tensor(loss.data)
                 prec1 = reduce_tensor(prec1)
                 prec5 = reduce_tensor(prec5)
@@ -260,8 +254,6 @@ class DALITrainer(object):
                     batch_time=batch_time, loss=losses,
                     top1=top1, top5=top5))
 
-            i += 1
-            
         print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
             .format(top1=top1, top5=top5))
 
@@ -609,7 +601,6 @@ class Tester(object):
                     superimposed_img
                 )
 
-    
 def reduce_tensor(tensor):
     '''
     rt = tensor.clone()
