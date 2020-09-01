@@ -47,14 +47,6 @@ Status/resolution of closed issues:
 
 The labels can only be set and modified by committers.
 
-
-### Issue Reporting Disclaimer
-
-We want to improve the quality of CLA Assistant and good bug reports are welcome! But our capacity is limited, thus we reserve the right to close or to not process insufficient bug reports in favor of those which are very cleanly documented and easy to reproduce. Even though we would like to solve each well-documented issue, there is always the chance that it will not happen - remember: CLA Assistant is Open Source and comes without warranty.
-
-Bug report analysis support is very welcome! (e.g. pre-analysis or proposing solutions)
-
-
 ## Contribute Code
 
 You are welcome to contribute code to NVAITC toolkit in order to fix bugs or to implement new features.
@@ -70,7 +62,7 @@ There are three important things to know:
 
 When you contribute (code, documentation, or anything else), you have to be aware that your contribution is covered by the same [MIT License](https://opensource.org/licenses/MIT) that is applied to NVAITC Toolkit itself.
 In particular you need to agree to the Individual Contributor License Agreement,
-which can be [found here](nvaitc-toolkit-cla.md).
+which can be [found here](CLA.md).
 
 
 ### How to contribute - the Process
@@ -86,9 +78,9 @@ which can be [found here](nvaitc-toolkit-cla.md).
     - ```Fixes #(issueNumber)```
     - Do NOT add a colon after "Fixes" - this prevents automatic closing.
 6.  Create a Pull Request
-7.  Follow the link posted by the CLA assistant to your pull request and accept it, as described in detail above.
+7.  Follow the link posted by the NVAITC Toolkit to your pull request and accept it, as described in detail above.
 8.  Wait for our code review and approval, possibly enhancing your change on request
-    -   Note that the CLA Assistant developers also have their regular duties, so depending on the required effort for reviewing, testing and clarification this may take a while
+    -   Note that the NVAITC Toolkit developers also have their regular duties, so depending on the required effort for reviewing, testing and clarification this may take a while
 
 9.  Once the change has been approved we will inform you in a comment
 10.  We will close the pull request, feel free to delete the now obsolete branch
