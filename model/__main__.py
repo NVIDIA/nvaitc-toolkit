@@ -37,7 +37,6 @@ import torch.optim as optim
 
 from model.launchers import Tester, DALITrainer, TVTrainer
 from model.loader.loaders import ImageNetTrainPipe, ImageNetValPipe
-from model.network import get_network
 from model.util import timeme
 
 import torchvision.transforms as transforms
