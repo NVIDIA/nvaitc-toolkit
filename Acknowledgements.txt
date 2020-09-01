@@ -1,7 +1,7 @@
 This software includes third-party components under the following licenses:
 
 ========================
-PyTorch
+PyTorch (https://github.com/pytorch/pytorch)
 
 Copyright (c) 2016-     Facebook, Inc            (Adam Paszke)
 Copyright (c) 2014-     Facebook, Inc            (Soumith Chintala)
@@ -727,8 +727,8 @@ Horovod (https://github.com/horovod/horovod)
    See the License for the specific language governing permissions and
    limitations under the License.
 
-================
-Torchvision (https://github.com/pytorch/vision)
+========================
+torchvision (https://github.com/pytorch/vision)
 
 BSD 3-Clause License
 
