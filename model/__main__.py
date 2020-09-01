@@ -64,8 +64,10 @@ except ImportError:
 
 @timeme
 def process_train(args, cfg=None):
-    # Since we start from scratch set start epoch as 1
-    args.epstart = 1
+
+    if args.local_rank == 0:
+        print("= Start training =")
+        print("=> Arch '{}'".format(args.arch))
 
     crop_size = 224
     val_size = 256
@@ -76,7 +78,7 @@ def process_train(args, cfg=None):
     traindir = os.path.join(args.data_dir, 'train')
     valdir = os.path.join(args.data_dir, 'val')
 
-    network = models.resnet50()
+    network = models.resnet18()
 
     # TODO 
     if args.sync_bn:
@@ -93,17 +95,6 @@ def process_train(args, cfg=None):
     else:
         network = network.cuda()
 
-    # If set > 0, will resume training from a given checkpoint.
-    resume_from_epoch = 0
-    for try_epoch in range(args.epochs, 0, -1):
-        if os.path.exists(args.checkpoint_format.format(epoch=try_epoch)):
-            resume_from_epoch = try_epoch
-            break
-
-    # Horovod: broadcast resume_from_epoch from rank 0 (which will have
-    # checkpoints) to other ranks.
-    resume_from_epoch = hvd.broadcast(torch.tensor(resume_from_epoch), root_rank=0,
-                                      name='resume_from_epoch').item()        
 
     # Instantiate distributed SGD optimizer
     optimizer = optim.SGD(network.parameters(), args.lr,
@@ -115,24 +106,9 @@ def process_train(args, cfg=None):
     # Horovod: wrap optimizer with DistributedOptimizer.
 
     if args.local_rank == 0:
-        print('World Size', args.world_size)
+        print("=> world size '{}'".format(args.world_size))
 
-    # Optionally resume from a checkpoint
-    if args.resume:
-        # Use a local scope to avoid dangling references
-        def resume():
-            if os.path.isfile(args.resume):
-                print("=> loading checkpoint '{}'".format(args.resume))
-                checkpoint = torch.load(args.resume, map_location = lambda storage, loc: storage.cuda(args.gpu))
-                args.start_epoch = checkpoint['epoch']
-                best_prec1 = checkpoint['best_prec1']
-                network.load_state_dict(checkpoint['state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer'])
-                print("=> loaded checkpoint '{}' (epoch {})"
-                      .format(args.resume, checkpoint['epoch']))
-            else:
-                print("=> no checkpoint found at '{}'".format(args.resume))
-        resume()
+
 
     if args.distributed:
         optimizer = hvd.DistributedOptimizer(
@@ -141,13 +117,6 @@ def process_train(args, cfg=None):
             backward_passes_per_step=args.batches_per_allreduce,
             op=hvd.Adasum if args.use_adasum else hvd.Average)
 
-    # Restore from a previous checkpoint, if initial_epoch is specified.
-    # Horovod: restore on the first worker which will broadcast weights to other workers.
-    if resume_from_epoch > 0 and hvd.rank() == 0:
-        filepath = args.checkpoint_format.format(epoch=resume_from_epoch)
-        checkpoint = torch.load(filepath)
-        model.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
 
     # Option for Apex/AMP multiprecision training
     if args.amp:
@@ -157,13 +126,37 @@ def process_train(args, cfg=None):
                 loss_scale=args.loss_scale
                 )
 
+    resume_from_epoch = args.start_epoch
+
+    # Optionally resume from a checkpoint
+    if args.resume:
+        # Use a local scope to avoid dangling references
+        def resume():
+            if os.path.isfile(args.resume):
+                print("=> loading checkpoint '{}'".format(args.resume))
+                checkpoint = torch.load(args.resume, map_location = lambda storage, loc: storage.cuda(args.gpu))
+                args.start_epoch = checkpoint['epoch']
+                args.best_prec1 = checkpoint['best_prec1']
+                print("=> best precision '{}'".format(args.best_prec1))
+                network.load_state_dict(checkpoint['state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                print("=> loaded checkpoint '{}' (epoch {})"
+                      .format(args.resume, checkpoint['epoch']))
+            else:
+                print("=> no checkpoint found at '{}'".format(args.resume))
+        resume()
+
+        # Horovod: broadcast resume_from_epoch from rank 0 (which will have
+        # checkpoints) to other ranks.
+        hvd.broadcast(torch.tensor(resume_from_epoch), root_rank=0, name='resume_from_epoch') 
+
     # To go before AMP initialize
     # Horovod: broadcast parameters & optimizer state.
     hvd.broadcast_parameters(network.state_dict(), root_rank=0)
     hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
     if args.loader == 'dali':
-        if hvd.local_rank() == 0:
+        if args.local_rank == 0:
             print('Using DALI as data loader')
         #train = get_loader('train_loader', args.batch_size, hvd.local_rank(), hvd.size(), traindir, **kwargs)    
         #train.build()
@@ -245,25 +238,6 @@ def process_train(args, cfg=None):
     
         launcher = TVTrainer(args, train_loader, train_sampler, val_loader, network, optimizer)
         launcher.run()
-
-def process_restart(args):
-    # Use a local scope to avoid dangling references
-    def resume():
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume, map_location = lambda storage, loc: storage.cuda(args.gpu))
-            args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                    .format(args.resume, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
-    resume()
- 
-    launcher = Trainer(cfg, loader, network, optimizer)
-    launcher.run()
 
 
 def process_test(args, cfg):
@@ -353,20 +327,17 @@ def main():
                     metavar='W', help='weight decay (default: 1e-4)')           
     ap_run.add_argument('--data-dir', default='/workspace/imagenet', 
                     help='data loading path')
-    ap_run.add_argument('--loss-scale', type=str, default=None)     
-    ap_run.add_argument('--resume', default='', type=str, metavar='PATH',
-                        help='path to latest checkpoint (default: none)')    
+    ap_run.add_argument('--loss-scale', type=str, default=None)       
     ap_run.add_argument('--warmup-epochs', type=float, default=5,
                         help='number of warmup epochs')
     ap_run.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
 
+    ap_run.add_argument('--resume', default='', type=str, metavar='PATH',
+                        help='path to latest checkpoint (default: none)')
+
     ap_run.set_defaults(process=process_train)
 
-    # Restart from state
-    ap_restart = sp.add_parser('restart')
-    ap_restart.add_argument('state', help='state file')
-    ap_restart.set_defaults(process=process_train)
 
     # Test model
     ap_restart = sp.add_parser('test')

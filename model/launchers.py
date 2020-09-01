@@ -53,7 +53,7 @@ class DALITrainer(object):
 
     def run(self):
         total_time = AverageMeter()
-        best_prec1 = 0
+        best_prec1 = self.args.best_prec1
 
         for epoch in range(self.args.start_epoch, self.args.epochs):
             batch_time = AverageMeter()
