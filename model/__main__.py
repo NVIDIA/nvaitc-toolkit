@@ -1,3 +1,24 @@
+# The MIT License (MIT)
+
+# Copyright (c) 2020 NVIDIA CORPORATION.
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 import os
 import random
 import shutil
@@ -73,6 +94,18 @@ def process_train(args, cfg=None):
     else:
         network = network.cuda()
 
+    # If set > 0, will resume training from a given checkpoint.
+    resume_from_epoch = 0
+    for try_epoch in range(args.epochs, 0, -1):
+        if os.path.exists(args.checkpoint_format.format(epoch=try_epoch)):
+            resume_from_epoch = try_epoch
+            break
+
+    # Horovod: broadcast resume_from_epoch from rank 0 (which will have
+    # checkpoints) to other ranks.
+    resume_from_epoch = hvd.broadcast(torch.tensor(resume_from_epoch), root_rank=0,
+                                      name='resume_from_epoch').item()        
+
     # Instantiate distributed SGD optimizer
     optimizer = optim.SGD(network.parameters(), args.lr,
                                 momentum=args.momentum,
@@ -109,9 +142,13 @@ def process_train(args, cfg=None):
             backward_passes_per_step=args.batches_per_allreduce,
             op=hvd.Adasum if args.use_adasum else hvd.Average)
 
-    # Horovod: broadcast parameters & optimizer state.
-    hvd.broadcast_parameters(network.state_dict(), root_rank=0)
-    hvd.broadcast_optimizer_state(optimizer, root_rank=0)
+    # Restore from a previous checkpoint, if initial_epoch is specified.
+    # Horovod: restore on the first worker which will broadcast weights to other workers.
+    if resume_from_epoch > 0 and hvd.rank() == 0:
+        filepath = args.checkpoint_format.format(epoch=resume_from_epoch)
+        checkpoint = torch.load(filepath)
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
 
     # Option for Apex/AMP multiprecision training
     if args.amp:
@@ -120,6 +157,11 @@ def process_train(args, cfg=None):
                 keep_batchnorm_fp32=args.keep_batchnorm_fp32,
                 loss_scale=args.loss_scale
                 )
+
+    # To go before AMP initialize
+    # Horovod: broadcast parameters & optimizer state.
+    hvd.broadcast_parameters(network.state_dict(), root_rank=0)
+    hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
     if args.loader == 'dali':
         if hvd.local_rank() == 0:
@@ -205,31 +247,22 @@ def process_train(args, cfg=None):
         launcher = TVTrainer(args, train_loader, train_sampler, val_loader, network, optimizer)
         launcher.run()
 
-#FIXME has not been adapted yet to the new structure of the code
-def process_restart(args, cfg):
-    cfg['amp_on'] = 1 if args.amp else None
-    # Since we restart get start epoch from the file name
-    cfg['epstart'] = int(re.search("-(\d+)", args.state).group(1))
-    # cfg['load_path'] = cfg['train_path']
-    cfg['load_path'] = './img/labels.txt'
-
-    hvd.init()
-    torch.cuda.set_device(hvd.local_rank())
-
-    loader = get_loader(cfg, hvd.local_rank(), hvd.size(), split='train')
-
-    # Load a network from file
-    network = torch.load(args.state)
-    network.cuda()
-
-    optimizer = optim.Adam(network.parameters())
-    optimizer = hvd.DistributedOptimizer(
-        optimizer, named_parameters=network.named_parameters()
-    )
-
-    if args.amp:
-        network, optimizer = amp.initialize(network, optimizer)
-
+def process_restart(args):
+    # Use a local scope to avoid dangling references
+    def resume():
+        if os.path.isfile(args.resume):
+            print("=> loading checkpoint '{}'".format(args.resume))
+            checkpoint = torch.load(args.resume, map_location = lambda storage, loc: storage.cuda(args.gpu))
+            args.start_epoch = checkpoint['epoch']
+            best_prec1 = checkpoint['best_prec1']
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            print("=> loaded checkpoint '{}' (epoch {})"
+                    .format(args.resume, checkpoint['epoch']))
+        else:
+            print("=> no checkpoint found at '{}'".format(args.resume))
+    resume()
+ 
     launcher = Trainer(cfg, loader, network, optimizer)
     launcher.run()
 
@@ -334,7 +367,7 @@ def main():
     # Restart from state
     ap_restart = sp.add_parser('restart')
     ap_restart.add_argument('state', help='state file')
-    ap_restart.set_defaults(process=process_restart)
+    ap_restart.set_defaults(process=process_train)
 
     # Test model
     ap_restart = sp.add_parser('test')
@@ -371,6 +404,13 @@ def main():
     ap.add_argument('--dali_cpu', action='store_true', 
         help='Runs CPU based version of DALI pipeline.')
 
+    # Profiling NVTX
+    ap.add_argument('--prof', default=-1, type=int,
+                        help='Only run 10 iterations for profiling.')
+
+    # Checkpoint 
+    ap.add_argument('--checkpoint-format', default='./checkpoint-{epoch}.pth.tar',
+                    help='checkpoint file format')
 
     args = ap.parse_args()
 
@@ -402,7 +442,6 @@ def main():
     cudnn.benchmark = True
 
     if args.deterministic:
-        # args.seed = 999
         cudnn.benchmark = False
         cudnn.deterministic = True
         torch.manual_seed(args.local_rank)
@@ -414,18 +453,7 @@ def main():
 
     args.allreduce_batch_size = args.batch_size * args.batches_per_allreduce    
 
-    # Horovod: print logs on the first worker.
-    # verbose = 1 if hvd.rank() == 0 else 0
-
     args.arch = 'resnet50'
-    
-    #cfg = {'save_nsteps': 5,
-    #       'test_path':
-    #       './data/img',
-    #       'save_path': './trained/state.pt',
-    #       'cam_dir': './cam',
-    #       #'image_size': (96, 96),
-    #       'image_size': (224, 224)}
 
     cfg = {}
 
@@ -443,7 +471,6 @@ def fast_collate(batch, memory_format):
     h = imgs[0].size[1]
     tensor = torch.zeros( (len(imgs), 3, h, w), dtype=torch.uint8).contiguous(memory_format=memory_format)
     for i, img in enumerate(imgs):
-        # img = transforms.ToTensor(img)
         nump_array = np.asarray(img, dtype=np.uint8)
         if(nump_array.ndim < 3):
             nump_array = np.expand_dims(nump_array, axis=-1)

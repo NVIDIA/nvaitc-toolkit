@@ -1,3 +1,25 @@
+
+# The MIT License (MIT)
+
+# Copyright (c) 2020 NVIDIA CORPORATION.
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 from apex import amp
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
 import cv2
@@ -48,45 +70,24 @@ class DALITrainer(object):
                 target = data[0]["label"].squeeze().cuda().long()
                 train_loader_len = int(math.ceil(self.train_loader._size / self.args.batch_size))
 
-                # if args.prof >= 0 and i == args.prof:
-                #    print("Profiling begun at iteration {}".format(i))
-                #    torch.cuda.cudart().cudaProfilerStart()
+                if self.args.prof >= 0 and i == args.prof:
+                    print("Profiling begun at iteration {}".format(i))
+                    torch.cuda.cudart().cudaProfilerStart()
 
-                # if args.prof >= 0: torch.cuda.nvtx.range_push("Body of iteration {}".format(i))
+                if self.args.prof >= 0: torch.cuda.nvtx.range_push("Body of iteration {}".format(i))
 
                 self.adjust_learning_rate(epoch, i, train_loader_len)
-                #if args.test:
-                #    if i > 10:
-                #        break
 
                 # compute output
-                #if args.prof >= 0: torch.cuda.nvtx.range_push("forward")
+                if self.args.prof >= 0: torch.cuda.nvtx.range_push("forward")
                 output = self.model(input)
-                #if args.prof >= 0: torch.cuda.nvtx.range_pop()
+                if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
                 loss = self.criterion(output, target)
 
                 # compute gradient and do SGD step
-                #if self.args.distributed:
-                #    self.optimizer.synchronize()
                 self.optimizer.zero_grad()
 
-                #if args.prof >= 0: torch.cuda.nvtx.range_push("backward")
-
-                #if self.args.amp is not None:
-                #    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                #        scaled_loss.backward()
-                #else:
-                #    loss.backward()
-                
-                #if args.prof >= 0: torch.cuda.nvtx.range_pop()
-
-                #if args.prof >= 0: torch.cuda.nvtx.range_push("optimizer.step()")
-                #if self.args.distributed:
-                #    with self.optimizer.skip_synchronize():
-                #        self.optimizer.step()
-                #else:
-                #    self.optimizer.step()
-                #if args.prof >= 0: torch.cuda.nvtx.range_pop()
+                if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward")
 
                 if self.args.amp:
                     with amp.scale_loss(loss, self.optimizer) as scaled_loss:
@@ -108,7 +109,7 @@ class DALITrainer(object):
                     # iteration, since they incur an allreduce and some host<->device syncs.
 
                     # Measure accuracy
-                    prec1, prec5 = self.accuracy(output.data, target, topk=(1, 5))
+                    prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
 
                     # Average loss and accuracy across processes for logging
                     if self.args.distributed:
@@ -132,7 +133,7 @@ class DALITrainer(object):
                             'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                             'Speed {3:.3f} ({4:.3f})\t'
                             'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
-                            #'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                            'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                             'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                             epoch, i, train_loader_len,
                             self.args.world_size*self.args.batch_size/batch_time.val,
@@ -140,19 +141,22 @@ class DALITrainer(object):
                             batch_time=batch_time,
                             loss=losses, top1=top1, top5=top5))
 
-                # Pop range "Body of iteration {}".format(i)
-                #if args.prof >= 0: torch.cuda.nvtx.range_pop()
+                        if self.log_writer:
+                            self.log_writer.add_scalar('train/loss', losses.avg, epoch)
+                            self.log_writer.add_scalar('train/accuracy1', top1.avg, epoch)
+                            self.log_writer.add_scalar('train/accuracy5', top5.avg, epoch)
 
-                #if args.prof >= 0 and i == args.prof + 10:
-                #    print("Profiling ended at iteration {}".format(i))
-                #    torch.cuda.cudart().cudaProfilerStop()
-                #    quit()
+                # Pop range "Body of iteration {}".format(i)
+                if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
+
+                if self.args.prof >= 0 and i == self.args.prof + 10:
+                    print("Profiling ended at iteration {}".format(i))
+                    torch.cuda.cudart().cudaProfilerStop()
+                    quit()
 
             avg_train_time = batch_time.avg
 
             total_time.update(avg_train_time)
-            #if args.test:
-            #    break
 
             # evaluate on validation set
             [prec1, prec5] = self.validate()
@@ -199,21 +203,6 @@ class DALITrainer(object):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
-    def accuracy(self, output, target, topk=(1,)):
-        """Computes the precision@k for the specified values of k"""
-        maxk = max(topk)
-        batch_size = target.size(0)
-
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-        res = []
-        for k in topk:
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
-            res.append(correct_k.mul_(100.0 / batch_size))
-        return res
-
     def validate(self):
         batch_time = AverageMeter()
         losses = AverageMeter()
@@ -236,7 +225,7 @@ class DALITrainer(object):
                 loss = self.criterion(output, target)
 
             # measure accuracy and record loss
-            prec1, prec5 = self.accuracy(output.data, target, topk=(1, 5))
+            prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
 
             if self.args.distributed:
                 reduced_loss = reduce_tensor(loss.data)
@@ -259,7 +248,7 @@ class DALITrainer(object):
                     'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                     'Speed {2:.3f} ({3:.3f})\t'
                     'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                    #'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                    'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                     'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                     i, val_loader_len,
                     self.args.world_size * self.args.batch_size / batch_time.val,
@@ -283,14 +272,12 @@ class TVTrainer(object):
         self.train_sampler = train_sampler
         self.args = args
 
-        # FIXME: comulative log writer
         # Horovod: write TensorBoard logs on first worker.
         self.log_writer = SummaryWriter(self.args.log_dir) if hvd.rank() == 0 else None
     
     def run(self):
         best_prec1 = 0
-        #for epoch in range(args.start_epoch, args.epochs):
-        for epoch in range(0, self.args.epochs):
+        for epoch in range(self.args.start_epoch, self.args.epochs):
             if self.args.distributed:
                 self.train_sampler.set_epoch(epoch)
 
@@ -308,30 +295,31 @@ class TVTrainer(object):
             i = 0
             while input is not None:
                 i += 1
-                #if args.prof >= 0 and i == args.prof:
-                #    print("Profiling begun at iteration {}".format(i))
-                #    torch.cuda.cudart().cudaProfilerStart()
+                if self.args.prof >= 0 and i == self.args.prof:
+                    print("Profiling begun at iteration {}".format(i))
+                    torch.cuda.cudart().cudaProfilerStart()
 
-                #if args.prof >= 0: torch.cuda.nvtx.range_push("Body of iteration {}".format(i))
+                if self.args.prof >= 0: torch.cuda.nvtx.range_push("Body of iteration {}".format(i))
 
                 self.adjust_learning_rate(epoch, i, len(self.train_loader))
 
                 # compute output
-                #if args.prof >= 0: torch.cuda.nvtx.range_push("forward")
+                if self.args.prof >= 0: torch.cuda.nvtx.range_push("forward")
                 output = self.model(input)
-                #if args.prof >= 0: torch.cuda.nvtx.range_pop()
+                if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
                 loss = self.criterion(output, target)
 
-                # compute gradient and do SGD step
-                #self.optimizer.synchronize()
-                
+                # compute gradient and do SGD step                
                 self.optimizer.zero_grad()
+
+                if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward")
 
                 if self.args.amp:
                     with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                         scaled_loss.backward()
                         if self.args.distributed:
                             self.optimizer.synchronize()
+                        
                     if self.args.distributed:                   
                         with self.optimizer.skip_synchronize():
                             self.optimizer.step()
@@ -341,21 +329,10 @@ class TVTrainer(object):
                     loss.backward()
                     self.optimizer.step()
 
-                #if args.prof >= 0: torch.cuda.nvtx.range_push("backward")
-                #if self.args.amp is not None:
-                #    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                #        scaled_loss.backward()
-                #else:
-                #    loss.backward()
+                if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
 
-                #if args.prof >= 0: torch.cuda.nvtx.range_pop()
-
-                # for param in model.parameters():
-                #     print(param.data.double().sum().item(), param.grad.data.double().sum().item())
 
                 #if args.prof >= 0: torch.cuda.nvtx.range_push("optimizer.step()")
-                #with self.optimizer.skip_synchronize():
-                #    self.optimizer.step()
                 #if args.prof >= 0: torch.cuda.nvtx.range_pop()
 
                 if i%self.args.print_freq == 0:
@@ -364,7 +341,7 @@ class TVTrainer(object):
                     # iteration, since they incur an allreduce and some host<->device syncs.
 
                     # Measure accuracy
-                    prec1, prec5 = self.accuracy(output.data, target, topk=(1, 5))
+                    prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
 
                     # Average loss and accuracy across processes for logging
                     if self.args.distributed:
@@ -388,7 +365,7 @@ class TVTrainer(object):
                             'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                             'Speed {3:.3f} ({4:.3f})\t'
                             'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
-                    #        'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                            'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                             'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                             epoch, i, len(self.train_loader),
                             self.args.world_size*self.args.batch_size/batch_time.val,
@@ -396,19 +373,22 @@ class TVTrainer(object):
                             batch_time=batch_time,
                             loss=losses, top1=top1, top5=top5))
 
+                        if self.log_writer:
+                            self.log_writer.add_scalar('train/loss', losses.avg, epoch)
+                            self.log_writer.add_scalar('train/accuracy1', top1.avg, epoch)
+                            self.log_writer.add_scalar('train/accuracy5', top5.avg, epoch)
 
-
-                #if args.prof >= 0: torch.cuda.nvtx.range_push("prefetcher.next()")
+                if self.args.prof >= 0: torch.cuda.nvtx.range_push("prefetcher.next()")
                 input, target = prefetcher.next()
-                #if args.prof >= 0: torch.cuda.nvtx.range_pop()
+                if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
 
                 # Pop range "Body of iteration {}".format(i)
-                #if args.prof >= 0: torch.cuda.nvtx.range_pop()
+                if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
 
-                #if args.prof >= 0 and i == args.prof + 10:
-                #    print("Profiling ended at iteration {}".format(i))
-                #    torch.cuda.cudart().cudaProfilerStop()
-                #    quit()
+                if self.args.prof >= 0 and i == self.args.prof + 10:
+                    print("Profiling ended at iteration {}".format(i))
+                    torch.cuda.cudart().cudaProfilerStop()
+                    quit()
 
             # evaluate on validation set
             prec1 = self.validate()
@@ -441,21 +421,6 @@ class TVTrainer(object):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
-    def accuracy(self, output, target, topk=(1,)):
-        """Computes the precision@k for the specified values of k"""
-        maxk = max(topk)
-        batch_size = target.size(0)
-
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-        res = []
-        for k in topk:
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
-            res.append(correct_k.mul_(100.0 / batch_size))
-        return res
-
     def validate(self):
         batch_time = AverageMeter()
         losses = AverageMeter()
@@ -479,7 +444,7 @@ class TVTrainer(object):
                 loss = self.criterion(output, target)
 
             # measure accuracy and record loss
-            prec1, prec5 = self.accuracy(output.data, target, topk=(1, 5))
+            prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
 
             if self.args.distributed:
                 reduced_loss = reduce_tensor(loss.data)
@@ -657,6 +622,21 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
         shutil.copyfile(filename, 'model_best.pth.tar')        
+
+def accuracy(output, target, topk=(1,)):
+    """Computes the precision@k for the specified values of k"""
+    maxk = max(topk)
+    batch_size = target.size(0)
+
+    _, pred = output.topk(maxk, 1, True, True)
+    pred = pred.t()
+    correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+    res = []
+    for k in topk:
+        correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+        res.append(correct_k.mul_(100.0 / batch_size))
+    return res
 
 # Horovod: average metrics from distributed training.
 class Metric(object):
