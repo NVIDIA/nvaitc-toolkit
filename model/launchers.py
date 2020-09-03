@@ -42,9 +42,9 @@ class DALITrainer(object):
         self.optimizer = optimizer
         self.criterion = CrossEntropyLoss().cuda()
         self.args = args
-
+        self.experiment_name = '{2}_{0}{1}'.format(2,3, args.arch)
         # Horovod: write TensorBoard logs on first worker.
-        self.log_writer = SummaryWriter(args.log_dir) if hvd.rank() == 0 else None
+        self.log_writer = SummaryWriter(args.log_dir, comment=self.experiment_name) if hvd.rank() == 0 else None
 
     def save(self, e):
         if hvd.local_rank() == 0:
@@ -86,6 +86,12 @@ class DALITrainer(object):
 
                 # compute gradient and do SGD step
                 self.optimizer.zero_grad()
+                # self.model.zero_grad()
+                # model.zero_grad() and optimizer.zero_grad() are the same if all model parameters are in that optimizer
+
+                # more efficient way to zero gradients
+                #for param in self.model.parameters():
+                #    param.grad = None
 
                 if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward")
 
@@ -159,7 +165,7 @@ class DALITrainer(object):
             total_time.update(avg_train_time)
 
             # evaluate on validation set
-            [prec1, prec5] = self.validate()
+            [prec1, prec5] = self.validate(epoch)
 
             # remember best prec@1 and save checkpoint
             if self.args.local_rank == 0:
@@ -178,7 +184,7 @@ class DALITrainer(object):
                         '##Perf  {2}'.format(
                         prec1,
                         prec5,
-                        self.args.total_batch_size / total_time.avg))
+                        int(self.args.total_batch_size / total_time.avg)))
 
             self.train_loader.reset()
             self.val_loader.reset()
@@ -203,7 +209,10 @@ class DALITrainer(object):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
-    def validate(self):
+        if self.log_writer:
+            self.log_writer.add_scalar('lr/lr', lr, epoch)
+
+    def validate(self, epoch):
         batch_time = AverageMeter()
         losses = AverageMeter()
         top1 = AverageMeter()
@@ -255,6 +264,11 @@ class DALITrainer(object):
                     self.args.world_size * self.args.batch_size / batch_time.avg,
                     batch_time=batch_time, loss=losses,
                     top1=top1, top5=top5))
+                    
+                if self.log_writer:
+                    self.log_writer.add_scalar('val/loss', losses.avg, epoch)
+                    self.log_writer.add_scalar('val/accuracy1', top1.avg, epoch)
+                    self.log_writer.add_scalar('val/accuracy5', top5.avg, epoch)
 
         print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
             .format(top1=top1, top5=top5))
@@ -276,7 +290,9 @@ class TVTrainer(object):
         self.log_writer = SummaryWriter(self.args.log_dir) if hvd.rank() == 0 else None
     
     def run(self):
-        best_prec1 = 0
+        total_time = AverageMeter()
+        best_prec1 = self.args.best_prec1
+
         for epoch in range(self.args.start_epoch, self.args.epochs):
             if self.args.distributed:
                 self.train_sampler.set_epoch(epoch)
@@ -309,9 +325,15 @@ class TVTrainer(object):
                 if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
                 loss = self.criterion(output, target)
 
-                # compute gradient and do SGD step                
-                self.optimizer.zero_grad()
+                # compute gradient and do SGD step
+                # self.optimizer.zero_grad()
+                # self.model.zero_grad()
+                # model.zero_grad() and optimizer.zero_grad() are the same if all model parameters are in that optimizer
 
+                # more efficient way to zero gradients
+                for param in self.model.parameters():
+                    param.grad = None
+                
                 if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward")
 
                 if self.args.amp:
@@ -390,8 +412,13 @@ class TVTrainer(object):
                     torch.cuda.cudart().cudaProfilerStop()
                     quit()
 
+
+            avg_train_time = batch_time.avg
+
+            total_time.update(avg_train_time)
+
             # evaluate on validation set
-            prec1 = self.validate()
+            [prec1, prec5] = self.validate(epoch)
 
             # remember best prec@1 and save checkpoint
             if self.args.local_rank == 0:
@@ -404,6 +431,14 @@ class TVTrainer(object):
                     'best_prec1': best_prec1,
                     'optimizer' : self.optimizer.state_dict(),
                 }, is_best)
+
+                if epoch == self.args.epochs - 1:
+                    print('##Top-1 {0}\n'
+                        '##Top-5 {1}\n'
+                        '##Perf  {2}'.format(
+                        prec1,
+                        prec5,
+                        int(self.args.total_batch_size / total_time.avg)))
 
     def adjust_learning_rate(self, epoch, step, len_epoch):
         """LR schedule that should yield 76% converged accuracy with batch size 256"""
@@ -420,8 +455,11 @@ class TVTrainer(object):
 
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
+        
+        if self.log_writer:
+            self.log_writer.add_scalar('lr/lr', lr, epoch)
 
-    def validate(self):
+    def validate(self, epoch):
         batch_time = AverageMeter()
         losses = AverageMeter()
         top1 = AverageMeter()
@@ -475,12 +513,17 @@ class TVTrainer(object):
                     batch_time=batch_time, loss=losses,
                     top1=top1, top5=top5))
 
+                if self.log_writer:
+                    self.log_writer.add_scalar('val/loss', losses.avg, epoch)
+                    self.log_writer.add_scalar('val/accuracy1', top1.avg, epoch)
+                    self.log_writer.add_scalar('val/accuracy5', top5.avg, epoch)                    
+
             input, target = prefetcher.next()
 
         print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
             .format(top1=top1, top5=top5))
 
-        return top1.avg
+        return [top1.avg, top5.avg]
 
     class data_prefetcher():
         def __init__(self, loader):

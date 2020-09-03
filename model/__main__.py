@@ -78,7 +78,7 @@ def process_train(args, cfg=None):
     traindir = os.path.join(args.data_dir, 'train')
     valdir = os.path.join(args.data_dir, 'val')
 
-    network = models.resnet18()
+    network = models.resnet101()
 
     # TODO 
     if args.sync_bn:
@@ -127,6 +127,8 @@ def process_train(args, cfg=None):
                 )
 
     resume_from_epoch = args.start_epoch
+
+    args.best_prec1 = 0
 
     # Optionally resume from a checkpoint
     if args.resume:
@@ -238,6 +240,9 @@ def process_train(args, cfg=None):
     
         launcher = TVTrainer(args, train_loader, train_sampler, val_loader, network, optimizer)
         launcher.run()
+
+    else:
+        print('No correct loader specified')
 
 
 def process_test(args, cfg):
@@ -431,7 +436,6 @@ def main():
         args.process(args, cfg)
     else:
         ap.print_help()
-
 
 def fast_collate(batch, memory_format):
 
