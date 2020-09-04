@@ -34,7 +34,7 @@ import time
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-class DALITrainer(object):
+class DALITrainer:
     def __init__(self, args, train_loader, val_loader, model, optimizer):
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -135,12 +135,12 @@ class DALITrainer(object):
                     end = time.time()
 
                     if self.args.local_rank == 0:
-                        print('Epoch: [{0}][{1}/{2}]\t'
-                            'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                            'Speed {3:.3f} ({4:.3f})\t'
-                            'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
-                            'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                            'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                        print(('Epoch: [{0}][{1}/{2}]\t'
+                            + 'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                            + 'Speed {3:.3f} ({4:.3f})\t'
+                            + 'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
+                            + 'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                            + 'Prec@5 {top5.val:.3f} ({top5.avg:.3f})').format(
                             epoch, i, train_loader_len,
                             self.args.world_size*self.args.batch_size/batch_time.val,
                             self.args.world_size*self.args.batch_size/batch_time.avg,
@@ -179,9 +179,9 @@ class DALITrainer(object):
                     'optimizer' : self.optimizer.state_dict(),
                 }, is_best)
                 if epoch == self.args.epochs - 1:
-                    print('##Top-1 {0}\n'
-                        '##Top-5 {1}\n'
-                        '##Perf  {2}'.format(
+                    print(('##Top-1 {0}\n'
+                        + '##Top-5 {1}\n'
+                        + '##Perf  {2}').format(
                         prec1,
                         prec5,
                         int(self.args.total_batch_size / total_time.avg)))
@@ -253,12 +253,12 @@ class DALITrainer(object):
 
             # TODO:  Change timings to mirror train().
             if self.args.local_rank == 0 and i % self.args.print_freq == 0:
-                print('Test: [{0}/{1}]\t'
-                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                    'Speed {2:.3f} ({3:.3f})\t'
-                    'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                    'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                    'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                print(('Test: [{0}/{1}]\t'
+                    + 'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                    + 'Speed {2:.3f} ({3:.3f})\t'
+                    + 'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                    + 'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                    + 'Prec@5 {top5.val:.3f} ({top5.avg:.3f})').format(
                     i, val_loader_len,
                     self.args.world_size * self.args.batch_size / batch_time.val,
                     self.args.world_size * self.args.batch_size / batch_time.avg,
@@ -275,7 +275,7 @@ class DALITrainer(object):
 
         return [top1.avg, top5.avg]
 
-class TVTrainer(object):
+class TVTrainer:
 
     def __init__(self, args, train_loader, train_sampler, val_loader, model, optimizer):
         self.train_loader = train_loader
@@ -383,12 +383,12 @@ class TVTrainer(object):
                     end = time.time()
 
                     if self.args.local_rank == 0:
-                        print('Epoch: [{0}][{1}/{2}]\t'
-                            'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                            'Speed {3:.3f} ({4:.3f})\t'
-                            'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
-                            'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                            'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                        print(('Epoch: [{0}][{1}/{2}]\t'
+                            + 'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                            + 'Speed {3:.3f} ({4:.3f})\t'
+                            + 'Loss {loss.val:.10f} ({loss.avg:.4f})\t'
+                            + 'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                            + 'Prec@5 {top5.val:.3f} ({top5.avg:.3f})').format(
                             epoch, i, len(self.train_loader),
                             self.args.world_size*self.args.batch_size/batch_time.val,
                             self.args.world_size*self.args.batch_size/batch_time.avg,
@@ -433,9 +433,9 @@ class TVTrainer(object):
                 }, is_best)
 
                 if epoch == self.args.epochs - 1:
-                    print('##Top-1 {0}\n'
-                        '##Top-5 {1}\n'
-                        '##Perf  {2}'.format(
+                    print(('##Top-1 {0}\n'
+                        + '##Top-5 {1}\n'
+                        + '##Perf  {2}').format(
                         prec1,
                         prec5,
                         int(self.args.total_batch_size / total_time.avg)))
@@ -501,12 +501,12 @@ class TVTrainer(object):
 
             # TODO:  Change timings to mirror train().
             if self.args.local_rank == 0 and i % self.args.print_freq == 0:
-                print('Test: [{0}/{1}]\t'
-                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                    'Speed {2:.3f} ({3:.3f})\t'
-                    'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                    'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                    'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                print(('Test: [{0}/{1}]\t'
+                    + 'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                    + 'Speed {2:.3f} ({3:.3f})\t'
+                    + 'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                    + 'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                    + 'Prec@5 {top5.val:.3f} ({top5.avg:.3f})').format(
                     i, len(self.val_loader),
                     self.args.world_size * self.args.batch_size / batch_time.val,
                     self.args.world_size * self.args.batch_size / batch_time.avg,
@@ -562,7 +562,7 @@ class TVTrainer(object):
             self.preload()
             return input, target
                 
-class Tester(object):
+class Tester:
     def __init__(self, cfg, loader, network, optimizer):
         self.iterator = loader.get()
         self.network = network
@@ -682,7 +682,7 @@ def accuracy(output, target, topk=(1,)):
     return res
 
 # Horovod: average metrics from distributed training.
-class Metric(object):
+class Metric:
     def __init__(self, name):
         self.name = name
         self.sum = torch.tensor(0.)
@@ -696,7 +696,7 @@ class Metric(object):
     def avg(self):
         return self.sum / self.n
 
-class AverageMeter(object):
+class AverageMeter:
     """Computes and stores the average and current value"""
     def __init__(self):
         self.reset()

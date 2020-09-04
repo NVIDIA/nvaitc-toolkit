@@ -325,9 +325,9 @@ def main():
     ap_run.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                         metavar='LR', help='Initial learning rate.  Will be scaled by <global batch size>/256: args.lr = args.lr*float(args.batch_size*args.world_size)/256.  A warmup schedule will also be applied over the first 5 epochs.')
     ap_run.add_argument('--batches-per-allreduce', type=int, default=1,
-                    help='number of batches processed locally before '
-                         'executing allreduce across workers; it multiplies '
-                         'total batch size.')       
+                    help=('number of batches processed locally before '
+                         + 'executing allreduce across workers; it multiplies '
+                         + 'total batch size.'))       
     ap_run.add_argument('--use-adasum', action='store_true', default=False,
                     help='use adasum algorithm to do reduction')       
     ap_run.add_argument('-b', '--batch-size', default=256, type=int,
