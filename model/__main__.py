@@ -24,6 +24,7 @@ import random
 import shutil
 import time
 import warnings
+import sys
 
 from apex import amp
 from argparse import ArgumentParser
@@ -65,10 +66,6 @@ except ImportError:
 @timeme
 def process_train(args, cfg=None):
 
-    if args.local_rank == 0:
-        print("= Start training =")
-        print("=> Arch '{}'".format(args.arch))
-
     crop_size = 224
     val_size = 256
     
@@ -78,7 +75,20 @@ def process_train(args, cfg=None):
     traindir = os.path.join(args.data_dir, 'train')
     valdir = os.path.join(args.data_dir, 'val')
 
-    network = models.resnet101()
+    if args.arch == 'resnet50':
+        network = models.resnet50()
+    elif args.arch == 'resnet101':
+        network = models.resnet101()
+    elif args.arch == 'resnet18':
+        network = models.resnet18()
+    else:
+        if args.local_rank == 0:
+            print('No network specified')
+        sys.exit()
+
+    if args.local_rank == 0:
+        print("= Start training =")
+        print("=> Arch '{}'".format(args.arch))
 
     # TODO 
     if args.sync_bn:
@@ -369,6 +379,9 @@ def main():
     # Loader
     ap.add_argument('-dl', '--loader', type=str, default="dali")
 
+    # Arch
+    ap.add_argument('-ar', '--arch', type=str, default="resnet50")
+
     # Deterministic runtime
     ap.add_argument('--deterministic', action='store_true')
 
@@ -382,10 +395,6 @@ def main():
     # Profiling NVTX
     ap.add_argument('--prof', default=-1, type=int,
                         help='Only run 10 iterations for profiling.')
-
-    # Checkpoint 
-    ap.add_argument('--checkpoint-format', default='./checkpoint-{epoch}.pth.tar',
-                    help='checkpoint file format')
 
     args = ap.parse_args()
 
@@ -413,7 +422,7 @@ def main():
         #torch.distributed.init_process_group(backend='nccl',
         #                                     init_method='env://')
 
-    # Enable cudnn benchmark
+    # Enable cudnn rk
     cudnn.benchmark = True
 
     if args.deterministic:
@@ -427,8 +436,6 @@ def main():
     args.total_batch_size = args.world_size * args.batch_size
 
     args.allreduce_batch_size = args.batch_size * args.batches_per_allreduce    
-
-    args.arch = 'resnet50'
 
     cfg = {}
 
