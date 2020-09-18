@@ -1,10 +1,12 @@
 # Introduction
 
-- The NVAITC (NVIDIA AI Technology Centre) toolkit is a Python codebase that showcases the interoperability of CUDA-X AI software stack in multi-GPU environments
+- The NVAITC (NVIDIA AI Technology Centre) toolkit is a Python codebase that showcases the interoperability of CUDA-X AI software stack in multi-GPU environments.
 
-- The goal of this project is to provide researchers a reference framework to build new projects on
+- The goal of this project is to provide researchers a reference framework to build new projects on.
 
 - The codebase might be subject to further changes as new versions of used libraries become available or new functionalities requested. It requests the availability of ImageNet to demonstrate how to train a network (ResNet) against a well known dataset.
+
+
 
 ## Environment setup
 
