@@ -139,3 +139,11 @@ torch2trt/
 
 # output
 output
+
+# outfiles
+dali_amp*
+dali_noamp*
+test*
+torchvision_amp*
+torchvision_noamp*
+

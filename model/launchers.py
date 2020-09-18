@@ -32,7 +32,9 @@ import math
 import shutil
 import time
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboardx import SummaryWriter
+from tensorboardX import SummaryWriter
+import datetime
 
 class DALITrainer:
     def __init__(self, args, train_loader, val_loader, model, optimizer):
@@ -42,9 +44,9 @@ class DALITrainer:
         self.optimizer = optimizer
         self.criterion = CrossEntropyLoss().cuda()
         self.args = args
-        self.experiment_name = '{2}_{0}{1}'.format(2,3, args.arch)
+        self.experiment_name = '{0}-{1}_{2}_{3}_{4}'.format(datetime.datetime.now().strftime("%Y%m%d"), args.arch, args.loader, args.batch_size, 'amp' if args.amp else 'noamp')
         # Horovod: write TensorBoard logs on first worker.
-        self.log_writer = SummaryWriter(args.log_dir, comment=self.experiment_name) if hvd.rank() == 0 else None
+        self.log_writer = SummaryWriter(logdir=args.log_dir + '/' + self.experiment_name, comment=self.experiment_name) if hvd.rank() == 0 else None
 
     def save(self, e):
         if hvd.local_rank() == 0:
@@ -70,7 +72,7 @@ class DALITrainer:
                 target = data[0]["label"].squeeze().cuda().long()
                 train_loader_len = int(math.ceil(self.train_loader._size / self.args.batch_size))
 
-                if self.args.prof >= 0 and i == args.prof:
+                if self.args.prof >= 0 and i == self.args.prof:
                     print("Profiling begun at iteration {}".format(i))
                     torch.cuda.cudart().cudaProfilerStart()
 
@@ -85,13 +87,13 @@ class DALITrainer:
                 loss = self.criterion(output, target)
 
                 # compute gradient and do SGD step
-                self.optimizer.zero_grad()
+                # self.optimizer.zero_grad()
                 # self.model.zero_grad()
                 # model.zero_grad() and optimizer.zero_grad() are the same if all model parameters are in that optimizer
 
                 # more efficient way to zero gradients
-                #for param in self.model.parameters():
-                #    param.grad = None
+                for param in self.model.parameters():
+                    param.grad = None
 
                 if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward")
 
@@ -286,8 +288,9 @@ class TVTrainer:
         self.train_sampler = train_sampler
         self.args = args
 
+        self.experiment_name = '{0}-{1}_{2}_{3}_{4}'.format(datetime.datetime.now().strftime("%Y%m%d"), args.arch, args.loader, args.batch_size, 'amp' if args.amp else 'noamp')
         # Horovod: write TensorBoard logs on first worker.
-        self.log_writer = SummaryWriter(self.args.log_dir) if hvd.rank() == 0 else None
+        self.log_writer = SummaryWriter(logdir=args.log_dir + '/' + self.experiment_name, comment=self.experiment_name) if hvd.rank() == 0 else None
     
     def run(self):
         total_time = AverageMeter()
