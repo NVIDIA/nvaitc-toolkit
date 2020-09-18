@@ -1,10 +1,10 @@
 # Introduction
 
-- The NVAITC (NVIDIA AI Technology Centre) toolkit is a Python codebase that showcases the use of most relevant NVIDIA deep learning libraries (DALI, AMP, TensorRT) and Horovod, a framework for distributed training. 
+- The NVAITC (NVIDIA AI Technology Centre) toolkit is a Python codebase that showcases the interoperability of CUDA-X AI software stack in multi-GPU environments
 
-- The purpose of this project, which includes code snippets taken from other NVIDIA Deep Learning examples, i.e. https://github.com/NVIDIA/apex/blob/master/examples/imagenet/main_amp.py, https://github.com/NVIDIA/DALI/blob/master/docs/examples/use_cases/pytorch/resnet50/main.py, is to illustrate how to combine these libraries together for achieving better training and inference performance. 
+- The goal of this project is to provide researchers a reference framework to build new projects on
 
-- The codebase might be subject to further changes as new versions of used libraries become available or new functionalities requested. It requests the availability of ImageNet to demonstrate how to train a network (ResNet50) against a well known dataset.
+- The codebase might be subject to further changes as new versions of used libraries become available or new functionalities requested. It requests the availability of ImageNet to demonstrate how to train a network (ResNet) against a well known dataset.
 
 ## Environment setup
 
@@ -43,7 +43,10 @@ The directory in which the `train/` and `val/` directories are placed, is referr
 
 ## Training Procedure
 
-Run `python model <ops1> train <ops2> ` using the following arguments:
+Run `python run_training_dali.py <ops1> <ops2> ` using the following arguments:
+Run `python run_training_torchvision.py <ops1> <ops2> `
+Run `python run_inference.py <ops1> <ops2> `
+
 
 | Argument | Possible values |
 |----------|----------|
