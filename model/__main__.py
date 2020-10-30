@@ -186,9 +186,11 @@ def process_train(args, cfg=None):
             dali_cpu=args.dali_cpu,
             shard_id=args.local_rank,
             num_shards=args.world_size)
+        
         pipe.build()
 
-        train_loader = DALIClassificationIterator(pipe, reader_name="Reader", fill_last_batch=False)
+        train_loader = DALIClassificationIterator(pipe, 
+                        reader_name="Reader", fill_last_batch=False)
 
         pipe = ImageNetValPipe(batch_size=args.batch_size,
                             num_threads=args.workers,
@@ -199,6 +201,8 @@ def process_train(args, cfg=None):
                             shard_id=args.local_rank,
                             num_shards=args.world_size)
         pipe.build()
+        
+        
         val_loader = DALIClassificationIterator(pipe, reader_name="Reader", fill_last_batch=False)        
 
         launcher = DALITrainer(args, train_loader, val_loader, network, optimizer)
@@ -228,6 +232,12 @@ def process_train(args, cfg=None):
 
         train_sampler = None
         val_sampler = None
+        
+        
+                def pin_memory(self):
+            self.inp = self.inp.pin_memory()
+            self.tgt = self.tgt.pin_memory()
+            return self
         
         if args.distributed:
             train_sampler = torch.utils.data.distributed.DistributedSampler(

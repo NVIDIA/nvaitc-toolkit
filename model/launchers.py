@@ -70,7 +70,8 @@ class DALITrainer:
             for i, data in enumerate(self.train_loader):
                 input = data[0]["data"]
                 target = data[0]["label"].squeeze().cuda().long()
-                train_loader_len = int(math.ceil(self.train_loader._size / self.args.batch_size))
+                train_loader_len = int(math.ceil(
+                    self.train_loader._size / self.args.batch_size))
 
                 if self.args.prof >= 0 and i == self.args.prof:
                     print("Profiling begun at iteration {}".format(i))
@@ -98,6 +99,7 @@ class DALITrainer:
                 if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward")
 
                 if self.args.amp:
+                    if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward pass with mixed precision")
                     with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                         scaled_loss.backward()
                         if self.args.distributed:
@@ -107,9 +109,12 @@ class DALITrainer:
                             self.optimizer.step()
                     else:
                         self.optimizer.step()
+                    if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
                 else:
+                    if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward pass w/o mixed precision")
                     loss.backward()
                     self.optimizer.step()
+                    if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
 
                 if i%self.args.print_freq == 0:
                     # Every print_freq iterations, check the loss, accuracy, and speed.
@@ -320,18 +325,12 @@ class TVTrainer:
 
                 if self.args.prof >= 0: torch.cuda.nvtx.range_push("Body of iteration {}".format(i))
 
-                self.adjust_learning_rate(epoch, i, len(self.train_loader))
-
                 # compute output
                 if self.args.prof >= 0: torch.cuda.nvtx.range_push("forward")
                 output = self.model(input)
+                # Pop range backward
                 if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
                 loss = self.criterion(output, target)
-
-                # compute gradient and do SGD step
-                # self.optimizer.zero_grad()
-                # self.model.zero_grad()
-                # model.zero_grad() and optimizer.zero_grad() are the same if all model parameters are in that optimizer
 
                 # more efficient way to zero gradients
                 for param in self.model.parameters():
@@ -353,9 +352,13 @@ class TVTrainer:
                 else:
                     loss.backward()
                     self.optimizer.step()
-
+                
+                # Pop range backward
                 if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
 
+                    
+                # Pop range "Body of iteration {}".format(i)
+                if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
 
                 #if args.prof >= 0: torch.cuda.nvtx.range_push("optimizer.step()")
                 #if args.prof >= 0: torch.cuda.nvtx.range_pop()

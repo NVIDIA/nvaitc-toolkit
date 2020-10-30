@@ -38,7 +38,7 @@ import sys
 from random import shuffle
 
 class ImageNetTrainPipe(Pipeline):
-    def __init__(self, batch_size, num_threads, device_id, data_dir, crop,
+    def __init__(self, batch_size, num_threads, device_id, data_dir, crop, 
                  shard_id, num_shards, dali_cpu=False):
         super(ImageNetTrainPipe, self).__init__(batch_size,
                                               num_threads,
@@ -52,8 +52,8 @@ class ImageNetTrainPipe(Pipeline):
         #let user decide which pipeline works him bets for RN version he runs
         dali_device = 'cpu' if dali_cpu else 'gpu'
         decoder_device = 'cpu' if dali_cpu else 'mixed'
-        # This padding sets the size of the internal nvJPEG buffers to be able to handle all images from full-sized ImageNet
-        # without additional reallocations
+        # This padding sets the size of the internal nvJPEG buffers to be able to 
+        # handle all images from full-sized ImageNet without additional reallocations
         device_memory_padding = 211025920 if decoder_device == 'mixed' else 0
         host_memory_padding = 140544512 if decoder_device == 'mixed' else 0
         self.decode = ops.ImageDecoderRandomCrop(device=decoder_device, output_type=types.RGB,
@@ -62,12 +62,10 @@ class ImageNetTrainPipe(Pipeline):
                                                  random_aspect_ratio=[0.8, 1.25],
                                                  random_area=[0.1, 1.0],
                                                  num_attempts=100)
-        self.res = ops.Resize(device=dali_device,
-                              resize_x=crop,
-                              resize_y=crop,
+        self.res = ops.Resize(device=dali_device, resize_x=crop, resize_y=crop, 
                               interp_type=types.INTERP_TRIANGULAR)
-        self.cmnp = ops.CropMirrorNormalize(device="gpu",
-                                            dtype=types.FLOAT,
+        
+        self.cmnp = ops.CropMirrorNormalize(device="gpu", dtype=types.FLOAT, 
                                             output_layout=types.NCHW,
                                             crop=(crop, crop),
                                             mean=[0.485 * 255,0.456 * 255,0.406 * 255],
