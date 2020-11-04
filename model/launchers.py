@@ -44,7 +44,7 @@ class DALITrainer:
         self.optimizer = optimizer
         self.criterion = CrossEntropyLoss().cuda()
         self.args = args
-        self.experiment_name = '{0}-{1}_{2}_{3}_{4}'.format(datetime.datetime.now().strftime("%Y%m%d"), args.arch, args.loader, args.batch_size, 'amp' if args.amp else 'noamp')
+        self.experiment_name = '{0}-{1}_{2}_{3}_{4}'.format(datetime.datetime.now().strftime("%Y%m%d"), args.arch, 'dali', args.batch_size, 'amp' if args.amp else 'noamp')
         # Horovod: write TensorBoard logs on first worker.
         self.log_writer = SummaryWriter(logdir=args.log_dir + '/' + self.experiment_name, comment=self.experiment_name) if hvd.rank() == 0 else None
 
@@ -293,7 +293,7 @@ class TVTrainer:
         self.train_sampler = train_sampler
         self.args = args
 
-        self.experiment_name = '{0}-{1}_{2}_{3}_{4}'.format(datetime.datetime.now().strftime("%Y%m%d"), args.arch, args.loader, args.batch_size, 'amp' if args.amp else 'noamp')
+        self.experiment_name = '{0}-{1}_{2}_{3}_{4}'.format(datetime.datetime.now().strftime("%Y%m%d"), args.arch, 'torchvision', args.batch_size, 'amp' if args.amp else 'noamp')
         # Horovod: write TensorBoard logs on first worker.
         self.log_writer = SummaryWriter(logdir=args.log_dir + '/' + self.experiment_name, comment=self.experiment_name) if hvd.rank() == 0 else None
     

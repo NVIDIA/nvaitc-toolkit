@@ -22,10 +22,12 @@ var/
 wheels/
 pip-wheel-metadata/
 share/python-wheels/
+apex/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
+*.whl
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
