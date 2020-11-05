@@ -13,7 +13,7 @@ The NVAITC Toolkit is released under the [MIT License](LICENSE).
 
 ## Installation
 
-Please find installation instructions in [INSTALL.md](INSTALL.md). You may follow the instructions in [DATASET.md] to prepare the datasets.
+Please find installation instructions in [INSTALL.md](INSTALL.md). You may follow the instructions in [DATASET.md](DATASET.md) to prepare the datasets.
 
 
 # Getting Started
