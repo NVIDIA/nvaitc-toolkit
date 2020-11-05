@@ -4,54 +4,77 @@
 
 - The goal of this project is to provide researchers a reference framework to build new projects on.
 
-- The codebase might be subject to further changes as new versions of used libraries become available or new functionalities requested. It requests the availability of ImageNet to demonstrate how to train a network (ResNet) against a well known dataset.
+- The codebase might be subject to further changes as new versions of used libraries become available or new functionalities requested. It requests the availability of ImageNet to demonstrate how to train a network (ResNet[18/50/101]) against a well known dataset.
+
+## License
+
+The NVAITC Toolkit is released under the [MIT License](LICENSE).
 
 
+## Installation
 
-## Environment setup
-
-This repository contains Dockerfile which extends the PyTorch NGC container and encapsulates some dependencies. Aside from these dependencies, ensure you have the following components:
-
-* [NVIDIA Docker](https://github.com/NVIDIA/nvidia-docker)
-* [PyTorch 20.08-py3 NGC container](https://ngc.nvidia.com/registry/nvidia-pytorch) or newer
-* Supported GPUs:
-    * [NVIDIA Volta architecture](https://www.nvidia.com/en-us/data-center/volta-gpu-architecture/)
-    * [NVIDIA Turing architecture](https://www.nvidia.com/en-us/geforce/turing/)
-    * [NVIDIA Ampere architecture](https://www.nvidia.com/en-us/data-center/nvidia-ampere-gpu-architecture/)
-
-## Data Preparation 
-
-This codes operates on ImageNet 1k, a widely popular image classification dataset from the ILSVRC challenge.
-
-To train your model using mixed or TF32 precision with Tensor Cores or using FP32, perform the following steps using the default parameters of the resnet50 model on the ImageNet dataset.
-
-1. [Download the images](http://image-net.org/download-images).
-
-2. Extract the training data:
-  ```bash
-  mkdir train && mv ILSVRC2012_img_train.tar train/ && cd train
-  tar -xvf ILSVRC2012_img_train.tar && rm -f ILSVRC2012_img_train.tar
-  find . -name "*.tar" | while read NAME ; do mkdir -p "${NAME%.tar}"; tar -xvf "${NAME}" -C "${NAME%.tar}"; rm -f "${NAME}"; done
-  cd ..
-  ```
-
-3. Extract the validation data and move the images to subfolders:
-  ```bash
-  mkdir val && mv ILSVRC2012_img_val.tar val/ && cd val && tar -xvf ILSVRC2012_img_val.tar
-  wget -qO- https://raw.githubusercontent.com/soumith/imagenetloader.torch/master/valprep.sh | bash
-  ```
-
-The directory in which the `train/` and `val/` directories are placed, is referred to as `<path to imagenet>` in this document.
-
-## Training Procedure
-
-Run `python run_training_dali.py <ops1> <ops2> ` using the following arguments:
-Run `python run_training_torchvision.py <ops1> <ops2> `
-Run `python run_inference.py <ops1> <ops2> `
+Please find installation instructions in [INSTALL.md](INSTALL.md). You may follow the instructions in [DATASET.md] to prepare the datasets.
 
 
-| Argument | Possible values |
-|----------|----------|
-| `--log-dir` | tensorboard log directory |
-| `--epochs` | Number of epochs (default: 90) |
-| `--base-lr` | Learning rate for a single GPU (default: 0.0125) |
+# Getting Started
+
+## Train ResNet model from scratch using DALI
+
+```
+python run_training_dali.py [-h] [--log-dir LOG_DIR] [--epochs EPOCHS]
+                            [--base-lr BASE_LR] [--momentum MOMENTUM]
+                            [--lr LR]
+                            [--batches-per-allreduce BATCHES_PER_ALLREDUCE]
+                            [--use-adasum] [-b N] [-j N]
+                            [--print-freq PRINT_FREQ] [--sync_bn]
+                            [--weight-decay W] [--warmup-epochs WARMUP_EPOCHS]
+                            [--start-epoch N] [--resume PATH] [--amp]
+                            [--opt-level OPT_LEVEL]
+                            [--keep-batchnorm-fp32 KEEP_BATCHNORM_FP32]
+                            [--loss-scale LOSS_SCALE]
+                            [--channels-last CHANNELS_LAST] [-ar ARCH]
+                            [--deterministic] [--fp16-allreduce] [--dali_cpu]
+                            [--prof PROF]
+                            DATA PATH
+```
+
+
+## Train ResNet model from scratch using Torchvision
+
+```
+python run_training_torchvision.py [-h] [--log-dir LOG_DIR] [--epochs EPOCHS]
+                                   [--base-lr BASE_LR] [--momentum MOMENTUM]
+                                   [--lr LR]
+                                   [--batches-per-allreduce BATCHES_PER_ALLREDUCE]
+                                   [--use-adasum] [-b N] [-j N]
+                                   [--print-freq PRINT_FREQ] [--sync_bn]
+                                   [--weight-decay W]
+                                   [--warmup-epochs WARMUP_EPOCHS]
+                                   [--start-epoch N] [--resume PATH] [--amp]
+                                   [--opt-level OPT_LEVEL]
+                                   [--keep-batchnorm-fp32 KEEP_BATCHNORM_FP32]
+                                   [--loss-scale LOSS_SCALE]
+                                   [--channels-last CHANNELS_LAST] [-ar ARCH]
+                                   [--deterministic] [--fp16-allreduce]
+                                   [--prof PROF]
+                                   DATA PATH
+
+```
+
+## Resume from an Existing Checkpoint
+
+You can resume your training from an existing checkpoint using the following option in the command line:
+
+```
+--resume <path-to-checkpoint>
+```
+
+## Perform Inference
+
+```
+python run_inference.py [-h] [--tensorrt] [--half] [--log-dir LOG_DIR] [-b N]
+                        [-j N] [--print-freq PRINT_FREQ] [--data-dir DATA_DIR]
+                        [-ar ARCH] [--deterministic] [--dali_cpu]
+                        PATH
+
+```

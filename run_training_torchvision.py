@@ -326,8 +326,8 @@ def main():
 
     parser = ArgumentParser(description='PyTorch Classification NVAITC Toolkit')
 
-    parser.add_argument('--data-dir', default='/workspace/imagenet', 
-                    help='data loading path')
+    parser.add_argument('data-dir', default='', help='data loading path', metavar='DATA PATH')
+    
     parser.add_argument('--log-dir', default='./logs', 
             help='tensorboard log directory')
     parser.add_argument('--epochs', type=int, default=90,
