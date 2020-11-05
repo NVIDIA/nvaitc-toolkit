@@ -2,8 +2,6 @@
 
 ## ImageNet
 
-## Data Preparation 
-
 This codes operates on ImageNet 1k, a widely popular image classification dataset from the ILSVRC challenge.
 
 To train your model using mixed or TF32 precision with Tensor Cores or using FP32, perform the following steps using the default parameters of the resnet50 model on the ImageNet dataset.
