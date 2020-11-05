@@ -19,48 +19,6 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-# The MIT License (MIT)
-
-# Copyright (c) 2020 NVIDIA CORPORATION.
-
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-# The MIT License (MIT)
-
-# Copyright (c) 2020 NVIDIA CORPORATION.
-
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 import os
 import random
 import shutil
@@ -78,9 +36,9 @@ import re
 import torch
 import torch.optim as optim
 
-from model.launchers import Tester, DALITrainer, TVTrainer
-from model.loader.loaders import ImageNetTrainPipe, ImageNetValPipe
-from model.util import timeme
+from launchers.torchvision import TVTrainer
+from loaders.pipe import ImageNetTrainPipe, ImageNetValPipe
+from util import timeme
 
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -128,8 +86,8 @@ def run(args):
     # Scale learning rate based on global batch size
     args.lr = args.lr * float(args.batch_size*args.world_size)/256.
 
-    traindir = os.path.join(args.data_dir, 'train')
-    valdir = os.path.join(args.data_dir, 'val')
+    traindir = os.path.join(args.datadir, 'train')
+    valdir = os.path.join(args.datadir, 'val')
 
     if args.arch == 'resnet50':
         network = models.resnet50()
@@ -324,9 +282,9 @@ def process_convert(args, cfg):
 
 def main():
 
-    parser = ArgumentParser(description='PyTorch Classification NVAITC Toolkit')
+    parser = ArgumentParser(description='NVAITC Toolkit Classification using TorchVision')
 
-    parser.add_argument('data-dir', default='', help='data loading path', metavar='DATA PATH')
+    parser.add_argument('datadir', default='', help='data loading path', metavar='DATA PATH')
     
     parser.add_argument('--log-dir', default='./logs', 
             help='tensorboard log directory')
