@@ -14,5 +14,5 @@
 - horovod: `pip install horovod`
 
 
-You can find most of the software is a preinstalled [NVIDIA GPU Cloud](ngc.nvidia.com) PyTorch container in version 19.10 and later.
+You can find most of the software in a preinstalled [NVIDIA GPU Cloud](ngc.nvidia.com) PyTorch container in version 19.10 and later or use the requirements.txt.
 
