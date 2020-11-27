@@ -1,5 +1,7 @@
-**NVIDIA AI Technology Centre (NVAITC) Toolkit**
+* NVIDIA AI Technology Centre (NVAITC)**
 ===============
+
+* Toolkit *
 
 ## Introduction
 
