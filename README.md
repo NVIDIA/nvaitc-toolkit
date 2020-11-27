@@ -1,7 +1,7 @@
-* NVIDIA AI Technology Centre (NVAITC)**
+** NVIDIA AI Technology Centre (NVAITC) **
 ===============
 
-* Toolkit *
+# Toolkit 
 
 ## Introduction
 
@@ -16,72 +16,16 @@
 The NVAITC Toolkit is released under the [MIT License](LICENSE).
 
 
-## Installation
+## Getting Started
 
 Please find installation instructions in [INSTALL.md](INSTALL.md). You may follow the instructions in [DATASET.md](DATASET.md) to prepare the datasets.
 
+# cuAugument
 
-# Getting Started
-
-## Train ResNet model from scratch using DALI
-
-```
-python run_training_dali.py [-h] [--log-dir LOG_DIR] [--epochs EPOCHS]
-                            [--base-lr BASE_LR] [--momentum MOMENTUM]
-                            [--lr LR]
-                            [--batches-per-allreduce BATCHES_PER_ALLREDUCE]
-                            [--use-adasum] [-b N] [-j N]
-                            [--print-freq PRINT_FREQ] [--sync_bn]
-                            [--weight-decay W] [--warmup-epochs WARMUP_EPOCHS]
-                            [--start-epoch N] [--resume PATH] [--amp]
-                            [--opt-level OPT_LEVEL]
-                            [--keep-batchnorm-fp32 KEEP_BATCHNORM_FP32]
-                            [--loss-scale LOSS_SCALE]
-                            [--channels-last CHANNELS_LAST] [-ar ARCH]
-                            [--deterministic] [--fp16-allreduce] [--dali_cpu]
-                            [--prof PROF]
-                            DATA PATH
-```
+## Introduction
 
 
-## Train ResNet model from scratch using Torchvision
+## Getting Started
 
-```
-python run_training_torchvision.py [-h] [--log-dir LOG_DIR] [--epochs EPOCHS]
-                                   [--base-lr BASE_LR] [--momentum MOMENTUM]
-                                   [--lr LR]
-                                   [--batches-per-allreduce BATCHES_PER_ALLREDUCE]
-                                   [--use-adasum] [-b N] [-j N]
-                                   [--print-freq PRINT_FREQ] [--sync_bn]
-                                   [--weight-decay W]
-                                   [--warmup-epochs WARMUP_EPOCHS]
-                                   [--start-epoch N] [--resume PATH] [--amp]
-                                   [--opt-level OPT_LEVEL]
-                                   [--keep-batchnorm-fp32 KEEP_BATCHNORM_FP32]
-                                   [--loss-scale LOSS_SCALE]
-                                   [--channels-last CHANNELS_LAST] [-ar ARCH]
-                                   [--deterministic] [--fp16-allreduce]
-                                   [--prof PROF]
-                                   DATA PATH
-
-```
-
-## Resume from an Existing Checkpoint
-
-You can resume your training from an existing checkpoint using the following option in the command line:
-
-```
---resume <path-to-checkpoint>
-```
-
-## Perform Inference
-
-```
-python run_inference.py [-h] [--tensorrt] [--half] [--log-dir LOG_DIR] [-b N]
-                        [-j N] [--print-freq PRINT_FREQ] [--data-dir DATA_DIR]
-                        [-ar ARCH] [--deterministic] [--dali_cpu]
-                        PATH
-
-```
 
 
