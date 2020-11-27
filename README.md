@@ -5,11 +5,7 @@
 
 ### Introduction
 
-- The NVAITC toolkit is a Python codebase that showcases the interoperability of CUDA-X AI software stack in multi-GPU environments. It collects code snippets from other NVIDIA repos.
-
-- The goal of this project is to provide researchers a reference framework to build new projects on.
-
-- The codebase might be subject to further changes as new versions of used libraries become available or new functionalities requested. It requests the availability of ImageNet to demonstrate how to train a network (ResNet[18/50/101]) against a well known dataset.
+Python codebase to showcase the interoperability of CUDA-X AI software stack in multi-GPU environments. The goal of this project is to provide researchers a reference framework to build new projects on. It requests the availability of ImageNet to demonstrate how to train a network (ResNet[18/50/101]) against a well known dataset.
 
 ### Clone repo
 
