@@ -14,7 +14,7 @@
 ### Clone repo
 
 ```
-git clone -b toolkit --single-branch https://github.com/nvidia/nvaitc-toolkit.git
+git clone -b toolkit --single-branch https://github.com/nvidia/nvaitc-toolkit.git toolkit
 ```
 
 ### Getting Started
@@ -31,7 +31,7 @@ cuAugment is a CUDA-accelerated 1D/2D/3D/4D augmenter library that utilizes a ju
 ### Clone repo
 
 ```
-git clone -b cuaugment --single-branch https://github.com/nvidia/nvaitc-toolkit.git
+git clone -b cuaugment --single-branch https://github.com/nvidia/nvaitc-toolkit.git cuaugment
 ```
 
 ### Getting Started
