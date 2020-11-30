@@ -7,7 +7,7 @@
 
 Python codebase to showcase the interoperability of CUDA-X AI software stack in multi-GPU environments. The goal of this project is to provide researchers a reference framework to build new projects on. It requests the availability of ImageNet to demonstrate how to train a network (ResNet[18/50/101]) against a well known dataset.
 
-**This codebase served as the underlying playground for the Oct 2020 NVAITC Webinar Series on DL available on [YouTube](https://www.youtube.com/watch?v=f-CvtA2nuN8&list=PL5B692fm6--sJLzBmCpUSpP36xUWwuO8c)**
+**This codebase served as the underlying playground for the Oct 2020 NVAITC Webinar Series on DL available on [YouTube](https://www.youtube.com/watch?v=f-CvtA2nuN8&list=PL5B692fm6--sJLzBmCpUSpP36xUWwuO8c).**
 
 ### Clone repo
 
