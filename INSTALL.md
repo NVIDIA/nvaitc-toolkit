@@ -1,5 +1,9 @@
 # Installation
 
+Two options:
+ 1. use the NVIDIA GPU Cloud pre-created container: `docker run --runtime=nvidia -it -d -v $PWD:/workspace nvcr.io/ea-nvaitc/toolkit:20.11-py3`
+ 1. create your own environment using the following requirements list
+ 
 ## Requirements
 - Python >= 3.6
 - PyTorch >= 1.3
