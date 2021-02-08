@@ -36,9 +36,10 @@ import torch
 import torch.optim as optim
 import trtorch
 
-from model.launchers import Tester, DALITrainer, TVTrainer, AverageMeter
-from model.loader.loaders import ImageNetTrainPipe, ImageNetValPipe
-from model.util import timeme
+from launchers.dali import DALITrainer
+from launchers.torchvision import TVTrainer, AverageMeter
+from loaders.pipe import ImageNetTrainPipe, ImageNetValPipe
+from util import timeme
 
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
 
