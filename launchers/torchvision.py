@@ -22,7 +22,6 @@
 
 from apex import amp
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
-import cv2
 import horovod.torch as hvd
 import numpy as np
 import torch
