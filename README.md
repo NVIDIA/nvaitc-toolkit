@@ -33,3 +33,17 @@ git clone -b cuaugment --single-branch https://github.com/nvidia/nvaitc-toolkit.
 ### Getting Started
 
 Please find details and installation instructions in [README.md](https://github.com/NVIDIA/nvaitc-toolkit/blob/cuaugment/README.md).
+
+# Build Docker container from scratch 
+
+The [Dockerfile](https://github.com/NVIDIA/nvaitc-toolkit/Dockerfile) available within this repository allows you build a new [docker](http://www.docker.com) container from scratch pulling both branches and installing packages needed to execute the code. 
+
+Before executing the docker build command please [download](https://developer.nvidia.com/nccl) the NCCL package from the NVIDIA Developer zone and edit the Dockerfile accordingly.
+
+
+
+```
+git clone https://github.com/nvidia/nvaitc-toolkit.git
+cd nvaitc-toolkit
+docker build .
+```
