@@ -20,9 +20,7 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-from apex import amp
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
-import horovod.torch as hvd
 import numpy as np
 import torch
 from util import timeme
@@ -31,9 +29,9 @@ import math
 import shutil
 import time
 import torch.nn.functional as F
-#from torch.utils.tensorboardx import SummaryWriter
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 import datetime
+import torch.distributed as dist
 
 class DALITrainer:
     def __init__(self, args, train_loader, val_loader, model, optimizer):
@@ -45,10 +43,11 @@ class DALITrainer:
         self.args = args
         self.experiment_name = '{0}-{1}_{2}_{3}_{4}'.format(datetime.datetime.now().strftime("%Y%m%d"), args.arch, 'dali', args.batch_size, 'amp' if args.amp else 'noamp')
         # Horovod: write TensorBoard logs on first worker.
-        self.log_writer = SummaryWriter(logdir=args.log_dir + '/' + self.experiment_name, comment=self.experiment_name) if hvd.rank() == 0 else None
-
+        self.log_writer = SummaryWriter(log_dir=args.log_dir + '/' + self.experiment_name, comment=self.experiment_name) if args.global_rank == 0 else None
+        if args.amp:
+            self.scaler = torch.cuda.amp.GradScaler()
     def save(self, e):
-        if hvd.local_rank() == 0:
+        if self.args.global_rank == 0:
             path = self.cfg['save_path']
             torch.save(self.network, path.replace('.pt', '-{0}.pt'.format(e)))
 
@@ -82,9 +81,14 @@ class DALITrainer:
 
                 # compute output
                 if self.args.prof >= 0: torch.cuda.nvtx.range_push("forward")
-                output = self.model(input)
+                if self.args.amp:
+                    with torch.autocast(device_type='cuda', dtype=torch.float16):
+                        output = self.model(input)
+                        loss = self.criterion(output, target)
+                else:
+                    output = self.model(input)
+                    loss = self.criterion(output, target)
                 if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
-                loss = self.criterion(output, target)
 
                 # compute gradient and do SGD step
                 # self.optimizer.zero_grad()
@@ -99,15 +103,9 @@ class DALITrainer:
 
                 if self.args.amp:
                     if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward pass with mixed precision")
-                    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                        if self.args.distributed:
-                            self.optimizer.synchronize()
-                    if self.args.distributed:                   
-                        with self.optimizer.skip_synchronize():
-                            self.optimizer.step()
-                    else:
-                        self.optimizer.step()
+                    self.scaler.scale(loss).backward()
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
                     if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
                 else:
                     if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward pass w/o mixed precision")
@@ -291,8 +289,7 @@ def reduce_tensor(tensor):
     '''
 
     rt = tensor.clone()
-    hvd.allreduce(rt, op=hvd.Sum)
-    rt /= hvd.size()
+    dist.all_reduce(rt, op=dist.ReduceOp.AVG)
     return rt
 
 def to_python_float(t):
@@ -329,7 +326,7 @@ class Metric:
         self.n = torch.tensor(0.)
 
     def update(self, val):
-        self.sum += hvd.allreduce(val.detach().cpu(), name=self.name)
+        self.sum += dist.all_reduce(val.detach().cpu(), name=self.name)
         self.n += 1
 
     @property

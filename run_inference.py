@@ -26,18 +26,17 @@ import time
 import warnings
 import sys
 
-from apex import amp
 from argparse import ArgumentParser
 from torchvision import datasets, transforms, models
 
-import horovod.torch as hvd
+
 import re
 import torch
 import torch.optim as optim
 import trtorch
 
 from launchers.dali import DALITrainer
-from launchers.torchvision import TVTrainer, AverageMeter
+from launchers.torchvision_ddp import TVTrainer, AverageMeter
 from loaders.pipe import ImageNetTrainPipe, ImageNetValPipe
 from util import timeme
 
@@ -57,6 +56,7 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 
 import pprint
+import torch.distributed as dist
 
 try:
     from nvidia.dali.plugin.pytorch import DALIClassificationIterator
@@ -65,6 +65,48 @@ try:
     import nvidia.dali.types as types
 except ImportError:
     raise ImportError("Please install DALI from https://www.github.com/NVIDIA/DALI to run this example.")
+
+
+
+
+ap = ArgumentParser(description='New Image Classifier')
+
+ap.add_argument('checkpoint', default='', type=str, metavar='PATH',
+                    help='path to latest checkpoint (default: none)')
+ap.add_argument('--tensorrt', default=False, action='store_true',
+                help='Runs using tensorrt')
+ap.add_argument('--half', default=False, action='store_true',
+                help='Runs using half precision')
+ap.add_argument('--log-dir', default='./logs', 
+        help='tensorboard log directory')
+ap.add_argument('-b', '--batch-size', default=256, type=int,
+                metavar='N', help='mini-batch size per process (default: 256)')
+ap.add_argument('-j', '--workers', default=4, type=int, metavar='N',
+                help='number of data loading workers (default: 4)')                    
+ap.add_argument('--print-freq', type=int, default=10,
+                help='output frequency')
+ap.add_argument('--data-dir', default='/workspace/imagenet', 
+                help='data loading path')
+ap.add_argument('-ar', '--arch', type=str, default="resnet50")
+ap.add_argument('--deterministic', action='store_true')
+ap.add_argument('--dali_cpu', action='store_true', 
+                help='Runs CPU based version of DALI pipeline.')
+#Pytorch Distributed
+parser.add_argument('--num_nodes', type=int, default=1,
+                help='Number of available nodes/hosts')
+parser.add_argument('--node_id', type=int, default=0,
+                help='Unique ID to identify the current node/host')
+parser.add_argument('--num_gpus', type=int, default=1,
+                help='Number of GPUs in each node')
+
+args = parser.parse_args()
+
+WORLD_SIZE = args.num_gpus * args.num_nodes
+os.environ['MASTER_ADDR'] = 'localhost' 
+os.environ['MASTER_PORT'] = '9957' 
+
+args = ap.parse_args()
+
 
 
 def to_python_float(t):
@@ -118,7 +160,7 @@ def validate(args, loader, model):
         n = correct(output.data, target)
 
         if args.distributed:
-            n = hvd.allreduce(n, op=hvd.Sum)
+            n = dist.all_reduce(n, op=dist.Sum)
         cor_count += n.cpu().numpy()
         tot_count += args.batch_size * args.world_size
         
@@ -184,49 +226,17 @@ def run(args):
     validate(args, loader, network)
 
 
-def main():
-
-    ap = ArgumentParser(description='New Image Classifier')
-
-    ap.add_argument('checkpoint', default='', type=str, metavar='PATH',
-                        help='path to latest checkpoint (default: none)')
-    ap.add_argument('--tensorrt', default=False, action='store_true',
-                    help='Runs using tensorrt')
-    ap.add_argument('--half', default=False, action='store_true',
-                    help='Runs using half precision')
-    ap.add_argument('--log-dir', default='./logs', 
-            help='tensorboard log directory')
-    ap.add_argument('-b', '--batch-size', default=256, type=int,
-                    metavar='N', help='mini-batch size per process (default: 256)')
-    ap.add_argument('-j', '--workers', default=4, type=int, metavar='N',
-                    help='number of data loading workers (default: 4)')                    
-    ap.add_argument('--print-freq', type=int, default=10,
-                    help='output frequency')
-    ap.add_argument('--data-dir', default='/workspace/imagenet', 
-                    help='data loading path')
-    ap.add_argument('-ar', '--arch', type=str, default="resnet50")
-    ap.add_argument('--deterministic', action='store_true')
-    ap.add_argument('--dali_cpu', action='store_true', 
-                    help='Runs CPU based version of DALI pipeline.')
-
-    args = ap.parse_args()
-
+def worker(local_rank,args):
     args.no_cuda = False
-
     args.cuda = not args.no_cuda and torch.cuda.is_available()
-
-    hvd.init()
-
-    # Horovod: limit # of CPU threads to be used per worker.
-    #torch.set_num_threads(4)
-
+    args.local_rank = local_rank
+    args.world_size = WORLD_SIZE
+    args.global_rank = args.node_id * args.num_gpus + local_rank
     if args.cuda:
-        # Horovod: pin GPU to local rank.
-        torch.cuda.set_device(hvd.local_rank())
-
-    args.local_rank = hvd.local_rank()
+        torch.cuda.set_device(args.local_rank)
+    args.local_rank = local_rank
     args.gpu = args.local_rank
-    args.world_size = hvd.size()
+    args.world_size = WORLD_SIZE
 
     args.distributed = args.world_size > 1
 
@@ -246,6 +256,5 @@ def main():
 
     run(args)
 
-
 if __name__ == '__main__': 
-    main()
+    torch.multiprocessing.spawn(worker, nprocs=args.num_gpus, args=(args,))
