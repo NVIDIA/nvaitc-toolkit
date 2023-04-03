@@ -20,9 +20,7 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-from apex import amp
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
-import horovod.torch as hvd
 import numpy as np
 import torch
 from util import timeme
@@ -31,8 +29,8 @@ import math
 import shutil
 import time
 import torch.nn.functional as F
-#from torch.utils.tensorboardx import SummaryWriter
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
+import torch.distributed as dist
 import datetime
 
 
@@ -49,12 +47,13 @@ class TVTrainer:
         self.args = args
 
         self.experiment_name = '{0}-{1}_{2}_{3}_{4}'.format(datetime.datetime.now().strftime("%Y%m%d"), args.arch, 'torchvision', args.batch_size, 'amp' if args.amp else 'noamp')
-        # Horovod: write TensorBoard logs on first worker.
-        self.log_writer = SummaryWriter(logdir=args.log_dir + '/' + self.experiment_name, comment=self.experiment_name) if hvd.rank() == 0 else None
-    
+        self.log_writer = SummaryWriter(log_dir=args.log_dir + '/' + self.experiment_name, comment=self.experiment_name) if args.global_rank == 0 else None
+        if args.amp:
+            self.scaler = torch.cuda.amp.GradScaler()
     def run(self):
         total_time = AverageMeter()
         best_prec1 = self.args.best_prec1
+        
 
         for epoch in range(self.args.start_epoch, self.args.epochs):
             if self.args.distributed:
@@ -69,8 +68,12 @@ class TVTrainer:
             self.model.train()
             end = time.time()
 
-            prefetcher = self.data_prefetcher(self.train_loader)
-            input, target = prefetcher.next()
+            # prefetcher = self.data_prefetcher(self.train_loader)
+            # input, target = prefetcher.next()
+            loader = iter(self.train_loader)
+            input,target = next(loader)
+            input = input.float().to(self.args.device)
+            target = target.to(self.args.device)
             i = 0
             while input is not None:
                 i += 1
@@ -82,10 +85,15 @@ class TVTrainer:
 
                 # compute output
                 if self.args.prof >= 0: torch.cuda.nvtx.range_push("forward")
-                output = self.model(input)
-                # Pop range backward
+                if self.args.amp:
+                    with torch.autocast(device_type='cuda', dtype=torch.float16):
+                        output = self.model(input)
+                        loss = self.criterion(output, target)
+                else:
+                    output = self.model(input)
+                    loss = self.criterion(output, target)
+                # Pop range backward       
                 if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
-                loss = self.criterion(output, target)
 
                 # more efficient way to zero gradients
                 for param in self.model.parameters():
@@ -94,16 +102,10 @@ class TVTrainer:
                 if self.args.prof >= 0: torch.cuda.nvtx.range_push("backward")
 
                 if self.args.amp:
-                    with amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                        if self.args.distributed:
-                            self.optimizer.synchronize()
-                        
-                    if self.args.distributed:                   
-                        with self.optimizer.skip_synchronize():
-                            self.optimizer.step()
-                    else:
-                        self.optimizer.step()
+                    self.scaler.scale(loss).backward()
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+
                 else:
                     loss.backward()
                     self.optimizer.step()
@@ -162,7 +164,11 @@ class TVTrainer:
                             self.log_writer.add_scalar('train/accuracy5', top5.avg, epoch)
 
                 if self.args.prof >= 0: torch.cuda.nvtx.range_push("prefetcher.next()")
-                input, target = prefetcher.next()
+                #input, target = prefetcher.next()
+                input, target = next(loader)
+                input = input.float()
+                input = input.to(self.args.device)
+                target = target.to(self.args.device)
                 if self.args.prof >= 0: torch.cuda.nvtx.range_pop()
 
                 # Pop range "Body of iteration {}".format(i)
@@ -333,8 +339,7 @@ def reduce_tensor(tensor):
     '''
 
     rt = tensor.clone()
-    hvd.allreduce(rt, op=hvd.Sum)
-    rt /= hvd.size()
+    dist.all_reduce(rt, op=dist.ReduceOp.AVG)
     return rt
 
 def to_python_float(t):
@@ -371,7 +376,7 @@ class Metric:
         self.n = torch.tensor(0.)
 
     def update(self, val):
-        self.sum += hvd.allreduce(val.detach().cpu(), name=self.name)
+        self.sum += dist.allreduce(val.detach().cpu(), name=self.name)
         self.n += 1
 
     @property
