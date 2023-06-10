@@ -33,11 +33,11 @@ from torchvision import datasets, transforms, models
 import re
 import torch
 import torch.optim as optim
-import trtorch
+import torch_tensorrt as trtorch
 
 from launchers.dali import DALITrainer
-from launchers.torchvision_ddp import TVTrainer, AverageMeter
-from loaders.pipe import ImageNetTrainPipe, ImageNetValPipe
+from launchers.torchvision import TVTrainer, AverageMeter
+from loaders.pipe import image_net_val_pipe
 from util import timeme
 
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
@@ -59,37 +59,34 @@ import pprint
 import torch.distributed as dist
 
 try:
-    from nvidia.dali.plugin.pytorch import DALIClassificationIterator
-    from nvidia.dali.pipeline import Pipeline
-    import nvidia.dali.ops as ops
-    import nvidia.dali.types as types
+    from nvidia.dali.plugin.pytorch import DALIClassificationIterator, LastBatchPolicy
 except ImportError:
     raise ImportError("Please install DALI from https://www.github.com/NVIDIA/DALI to run this example.")
 
 
 
 
-ap = ArgumentParser(description='New Image Classifier')
+parser = ArgumentParser(description='New Image Classifier')
 
-ap.add_argument('checkpoint', default='', type=str, metavar='PATH',
+parser.add_argument('checkpoint', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
-ap.add_argument('--tensorrt', default=False, action='store_true',
+parser.add_argument('--tensorrt', default=False, action='store_true',
                 help='Runs using tensorrt')
-ap.add_argument('--half', default=False, action='store_true',
+parser.add_argument('--half', default=False, action='store_true',
                 help='Runs using half precision')
-ap.add_argument('--log-dir', default='./logs', 
+parser.add_argument('--log-dir', default='./logs', 
         help='tensorboard log directory')
-ap.add_argument('-b', '--batch-size', default=256, type=int,
+parser.add_argument('-b', '--batch-size', default=256, type=int,
                 metavar='N', help='mini-batch size per process (default: 256)')
-ap.add_argument('-j', '--workers', default=4, type=int, metavar='N',
+parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                 help='number of data loading workers (default: 4)')                    
-ap.add_argument('--print-freq', type=int, default=10,
+parser.add_argument('--print-freq', type=int, default=10,
                 help='output frequency')
-ap.add_argument('--data-dir', default='/workspace/imagenet', 
+parser.add_argument('--data-dir', default='/workspace/imagenet', 
                 help='data loading path')
-ap.add_argument('-ar', '--arch', type=str, default="resnet50")
-ap.add_argument('--deterministic', action='store_true')
-ap.add_argument('--dali_cpu', action='store_true', 
+parser.add_argument('-ar', '--arch', type=str, default="resnet50")
+parser.add_argument('--deterministic', action='store_true')
+parser.add_argument('--dali_cpu', action='store_true', 
                 help='Runs CPU based version of DALI pipeline.')
 #Pytorch Distributed
 parser.add_argument('--num_nodes', type=int, default=1,
@@ -105,7 +102,6 @@ WORLD_SIZE = args.num_gpus * args.num_nodes
 os.environ['MASTER_ADDR'] = 'localhost' 
 os.environ['MASTER_PORT'] = '9957' 
 
-args = ap.parse_args()
 
 
 
@@ -185,16 +181,17 @@ def run(args):
     valdir = os.path.join(args.data_dir, 'val')
 
     # Loader
-    pipe = ImageNetValPipe(batch_size=args.batch_size,
+    pipe = image_net_val_pipe(batch_size=args.batch_size,
                         num_threads=args.workers,
                         device_id=args.local_rank,
                         data_dir=valdir,
                         crop=crop_size,
                         size=val_size,
+                        dali_cpu=args.dali_cpu,
                         shard_id=args.local_rank,
                         num_shards=args.world_size)
     pipe.build()
-    loader = DALIClassificationIterator(pipe, reader_name="Reader", fill_last_batch=True)        
+    loader = DALIClassificationIterator(pipe, reader_name="Reader", last_batch_policy=LastBatchPolicy.PARTIAL)        
 
     # Network
     if args.arch == 'resnet50':

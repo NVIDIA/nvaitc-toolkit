@@ -19,4 +19,4 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-from .pipe import ImageNetTrainPipe, ImageNetValPipe
+from .pipe import image_net_train_pipe, image_net_val_pipe

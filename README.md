@@ -38,6 +38,7 @@ python run_training_dali.py [-h] [--log-dir LOG_DIR] [--epochs EPOCHS]
                             [--channels-last CHANNELS_LAST] [-ar ARCH]
                             [--deterministic] [--fp16-allreduce] [--dali_cpu]
                             [--prof PROF]
+                            [--dali-auto-augment]
                             DATA PATH
 ```
 
@@ -73,6 +74,8 @@ You can resume your training from an existing checkpoint using the following opt
 ```
 
 ## Perform Inference
+
+TODO: update DALI for inference
 
 ```
 python run_inference.py [-h] [--tensorrt] [--half] [--log-dir LOG_DIR] [-b N]

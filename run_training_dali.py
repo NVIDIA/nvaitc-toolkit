@@ -32,7 +32,7 @@ import torch
 import torch.optim as optim
 
 from launchers.dali import DALITrainer
-from loaders.pipe import ImageNetTrainPipe, ImageNetValPipe
+from loaders.pipe import image_net_train_pipe, image_net_val_pipe
 from util import timeme
 
 import torchvision.transforms as transforms
@@ -53,9 +53,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
 try:
-    from nvidia.dali.plugin.pytorch import DALIClassificationIterator
-    from nvidia.dali.pipeline import Pipeline
-    import nvidia.dali.ops as ops
+    from nvidia.dali.plugin.pytorch import DALIClassificationIterator, LastBatchPolicy
     import nvidia.dali.types as types
 except ImportError:
     raise ImportError("Please install DALI from https://www.github.com/NVIDIA/DALI to run this example.")
@@ -117,6 +115,8 @@ parser.add_argument('--fp16-allreduce', action='store_true', default=False,
 
 # CPU Based DALI pipeline
 parser.add_argument('--dali_cpu', action='store_true', help='Runs CPU based version of DALI pipeline.')
+# DALI auto_augmentation policy
+parser.add_argument('--dali_auto_augment', action='store_true', default=False, help='Runs auto augmentation policy for ImageNet')
 
 # Profiling NVTX
 parser.add_argument('--prof', default=-1, type=int,  help='Only run 10 iterations for profiling.')
@@ -133,7 +133,12 @@ args = parser.parse_args()
 
 WORLD_SIZE = args.num_gpus * args.num_nodes
 os.environ['MASTER_ADDR'] = 'localhost' 
-os.environ['MASTER_PORT'] = '9957' 
+os.environ['MASTER_PORT'] = '9957'
+
+print('The code will most likely crash if you don"t have DALI >= 1.26')
+print('You can substitute line 36 in loaders/pipe.py with "@pipeline_def()" to still use the code without updating DALI & without auto augment')
+if args.dali_auto_augment:
+    print('Make sure you have at least DALI 1.26 to use auto augmentations')
     
 def worker(local_rank,args):
     args.no_cuda = False
@@ -240,32 +245,34 @@ def worker(local_rank,args):
     if args.global_rank == 0:
         print('Using DALI as data loader')
 
-    pipe = ImageNetTrainPipe(batch_size=args.batch_size, 
+    train_pipe = image_net_train_pipe(batch_size=args.batch_size, 
         num_threads=args.workers,
         device_id=args.local_rank,
+        seed=12 + args.local_rank,
         data_dir=traindir,
         crop=crop_size,
         dali_cpu=args.dali_cpu,
         shard_id=args.local_rank,
-        num_shards=args.world_size)
-    
-    pipe.build()
+        num_shards=args.world_size,
+        dali_auto_augment=args.dali_auto_augment)
+    train_pipe.build()
 
-    train_loader = DALIClassificationIterator(pipe, 
-                    reader_name="Reader", fill_last_batch=False)
+    train_loader = DALIClassificationIterator(train_pipe, 
+                    reader_name="Reader", last_batch_policy=LastBatchPolicy.DROP)
 
-    pipe = ImageNetValPipe(batch_size=args.batch_size,
+    val_pipe = image_net_val_pipe(batch_size=args.batch_size,
                         num_threads=args.workers,
                         device_id=args.global_rank,
+                        seed=12 + args.local_rank,
                         data_dir=valdir,
                         crop=crop_size,
                         size=val_size,
+                        dali_cpu=args.dali_cpu,
                         shard_id=args.global_rank,
                         num_shards=args.world_size)
-    pipe.build()
+    val_pipe.build()
     
-    
-    val_loader = DALIClassificationIterator(pipe, reader_name="Reader", fill_last_batch=False)        
+    val_loader = DALIClassificationIterator(val_pipe, reader_name="Reader", last_batch_policy=LastBatchPolicy.DROP)        
 
     launcher = DALITrainer(args, train_loader, val_loader, network, optimizer)
     launcher.run()
