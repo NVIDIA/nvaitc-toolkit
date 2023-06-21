@@ -33,7 +33,6 @@ import torch
 import torch.optim as optim
 
 from launchers.torchvision import TVTrainer
-from loaders.pipe import ImageNetTrainPipe, ImageNetValPipe
 from util import timeme
 
 import torchvision.transforms as transforms
@@ -50,17 +49,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 import pprint
 import torch.distributed as dist
-
-
-try:
-    from nvidia.dali.plugin.pytorch import DALIClassificationIterator
-    from nvidia.dali.pipeline import Pipeline
-    import nvidia.dali.ops as ops
-    import nvidia.dali.types as types
-except ImportError:
-    raise ImportError("Please install DALI from https://www.github.com/NVIDIA/DALI to run this example.")
-
-
 
 
 parser = ArgumentParser(description='NVAITC Toolkit Classification using TorchVision')
